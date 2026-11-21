@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Oficina OS" />
+  <title>MenaChaos OS — Oficina Virtual v2</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <!-- Dimmer overlay para modo escritorio nocturno en iPad -->
+  <div id="dim-overlay" class="dim-overlay" aria-hidden="true"></div>
+
+  <!-- Modal de acceso rápido (solo clave la primera vez) -->
+  <div id="auth-modal" class="modal-backdrop hidden">
+    <div class="auth-card">
+      <div class="auth-logo">🏢</div>
+      <h1>MenaChaos OS <span class="badge-ver">v2</span></h1>
+      <p class="auth-sub">Tu puente de Google Apps Script ya está precargado. Solo ingresa tu clave una vez y quedará guardada en este dispositivo.</p>
+
+      <form id="auth-form" autocomplete="off">
+        <label class="field-label" for="auth-secret-input">Clave de acceso (API_SECRET)</label>
+        <input id="auth-secret-input" type="password" class="input" placeholder="Ingresa tu API_SECRET" required />
+
+        <details class="advanced-url">
+          <summary>URL del puente (precargada)</summary>
+          <input id="auth-url-input" type="url" class="input input-sm" />
+        </details>
+
+        <div id="auth-error" class="form-error hidden"></div>
+
+        <button type="submit" id="auth-submit-btn" class="btn btn-primary btn-full">
+          Conectar Oficina Real
+        </button>
+      </form>
+
+      <div class="auth-divider"><span>o</span></div>
+      <button type="button" id="auth-demo-btn" class="btn btn-ghost btn-full">
+        Explorar en Modo Demo (sin conexión)
+      </button>
+    </div>
+  </div>
+
+  <!-- App Shell -->
+  <div id="app-shell" class="app-shell">
+    <!-- Topbar -->
+    <header id="topbar" class="topbar">
+      <div class="topbar-left">
+        <div class="brand">
+          <span class="brand-dot" id="conn-dot" title="Estado de conexión"></span>
+          <strong>MenaChaos OS</strong>
+        </div>
+
+        <div class="office-switcher-wrap">
+          <select id="office-selector" class="office-select" aria-label="Seleccionar oficina"></select>
+        </div>
+      </div>
+
+      <nav class="main-nav" aria-label="Vistas principales">
+        <button class="nav-btn active" data-view="office">🏢 Oficina</button>
+        <button class="nav-btn" data-view="dashboard">📊 Tablero</button>
+        <button class="nav-btn" data-view="agents">🤖 Agentes</button>
+        <button class="nav-btn" data-view="design">🎨 Diseño</button>
+      </nav>
+
+      <div class="topbar-right">
+        <button id="alerts-pill" class="pill-btn hidden" title="Alertas de sistema (Gmail)">
+          ⚠️ <span id="alerts-count">0</span>
+        </button>
+        <span id="sync-status" class="sync-label">Sin sincronizar</span>
+        <button id="btn-sync" class="icon-btn" title="Sincronizar ahora">🔄</button>
+        <button id="btn-dim" class="icon-btn" title="Atenuar brillo (iPad)">🌙</button>
+        <button id="btn-kiosk" class="icon-btn" title="Modo Kiosco">⛶</button>
+      </div>
+    </header>
+
+    <!-- Botón flotante para salir de modo kiosco -->
+    <button id="btn-exit-kiosk" class="exit-kiosk-btn hidden">Salir de Kiosco</button>
+
+    <!-- Contenedor de vistas -->
+    <main class="main-stage">
+      <!-- VISTA 1: OFICINA ISOMÉTRICA -->
+      <section id="view-office" class="view active">
+        <div class="canvas-wrapper">
+          <canvas id="office-canvas"></canvas>
+
+          <!-- HUD superior izquierdo -->
+          <div class="office-hud-top">
+            <div class="hud-card">
+              <div class="hud-title" id="hud-office-name">Sede Central</div>
+              <div class="hud-sub" id="hud-office-sub">Hogar, MG 6 y Bots</div>
+            </div>
+            <div class="hud-pills" id="hud-summary-pills"></div>
+          </div>
+
+          <!-- Controles de cámara -->
+          <div class="camera-controls">
+            <button id="cam-zoom-in" class="cam-btn" title="Acercar">+</button>
+            <button id="cam-zoom-out" class="cam-btn" title="Alejar">−</button>
+            <button id="cam-reset" class="cam-btn" title="Centrar vista">⌖</button>
+          </div>
+
+          <!-- Barra rápida inferior de agentes -->
+          <div id="agent-quickbar" class="agent-quickbar"></div>
+        </div>
+
+        <!-- Panel Inspector lateral deslizable -->
+        <aside id="inspector-drawer" class="inspector-drawer closed">
+          <div class="drawer-header">
+            <div>
+              <span id="drawer-badge" class="status-badge">VERDE</span>
+              <h2 id="drawer-title">Agente</h2>
+              <p id="drawer-role" class="muted"></p>
+            </div>
+            <button id="drawer-close" class="icon-btn">✕</button>
+          </div>
+          <div id="drawer-body" class="drawer-body"></div>
+        </aside>
+      </section>
+
+      <!-- VISTA 2: TABLERO WIDGETS -->
+      <section id="view-dashboard" class="view scrollable-view">
+        <div class="section-header">
+          <div>
+            <h2>Tablero Operativo</h2>
+            <p class="muted" id="dash-subtitle">Vista consolidada de tu oficina activa</p>
+          </div>
+          <button id="dash-refresh-btn" class="btn btn-secondary">🔄 Actualizar datos</button>
+        </div>
+        <div id="dashboard-alerts-box" class="alerts-banner hidden"></div>
+        <div id="dashboard-grid" class="dashboard-grid"></div>
+      </section>
+
+      <!-- VISTA 3: GESTOR DE AGENTES Y OFICINAS -->
+      <section id="view-agents" class="view scrollable-view">
+        <div class="section-header">
+          <div>
+            <h2>Oficinas y Agentes (Por Capas)</h2>
+            <p class="muted">Agrega, edita o elimina oficinas y agentes sin tocar el código base. Todo se guarda en <code>Config_Oficina</code>.</p>
+          </div>
+          <div class="header-actions">
+            <button id="btn-new-office" class="btn btn-secondary">+ Nueva Oficina</button>
+            <button id="btn-new-agent" class="btn btn-primary">+ Nuevo Agente</button>
+          </div>
+        </div>
+
+        <div class="manager-grid">
+          <div class="panel">
+            <h3>Tus Oficinas / Pisos</h3>
+            <div id="offices-list" class="entity-list"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title-row">
+              <h3>Agentes en <span id="mgr-office-name">Sede Central</span></h3>
+              <span class="muted" id="mgr-agent-count"></span>
+            </div>
+            <div id="agents-list" class="entity-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- VISTA 4: DISEÑO, TEMAS Y CONEXIÓN -->
+      <section id="view-design" class="view scrollable-view">
+        <div class="section-header">
+          <div>
+            <h2>Diseño Visual y Conexión</h2>
+            <p class="muted">Cambia el estilo de tu oficina en vivo o gestiona tu enlace con el puente de Apps Script.</p>
+          </div>
+        </div>
+
+        <div class="design-grid">
+          <div class="panel">
+            <h3>Temas Visuales de la Oficina</h3>
+            <p class="muted small">Al elegir un tema, la oficina se remodela en vivo. Puedes aplicarlo globalmente o solo a la oficina activa.</p>
+            <div class="theme-scope-toggle">
+              <label><input type="radio" name="theme-scope" value="global" checked /> Tema global</label>
+              <label><input type="radio" name="theme-scope" value="office" /> Solo esta oficina</label>
+            </div>
+            <div id="themes-grid" class="themes-grid"></div>
+          </div>
+
+          <div class="panel">
+            <h3>Conexión al Puente Real</h3>
+            <div class="form-stack">
+              <div>
+                <label class="field-label">URL Web App (Google Apps Script)</label>
+                <input id="cfg-bridge-url" type="url" class="input" />
+              </div>
+              <div>
+                <label class="field-label">API_SECRET (guardada solo en este dispositivo)</label>
+                <input id="cfg-api-secret" type="password" class="input" placeholder="Tu clave secreta" />
+              </div>
+              <div>
+                <label class="field-label">Auto-refresco (minutos)</label>
+                <select id="cfg-refresh-min" class="input">
+                  <option value="2">Cada 2 minutos</option>
+                  <option value="5">Cada 5 minutos</option>
+                  <option value="10">Cada 10 minutos</option>
+                  <option value="15">Cada 15 minutos</option>
+                  <option value="0">Solo manual</option>
+                </select>
+              </div>
+              <div class="btn-row">
+                <button id="btn-save-connection" class="btn btn-primary">Guardar y Reconectar</button>
+                <button id="btn-test-ping" class="btn btn-secondary">Probar Ping</button>
+              </div>
+              <div id="conn-feedback" class="feedback-msg"></div>
+            </div>
+
+            <hr class="divider" />
+            <h3>Respaldo de Configuración (JSON)</h3>
+            <p class="muted small">Exporta o importa tus oficinas y agentes como archivo JSON portátil.</p>
+            <div class="btn-row">
+              <button id="btn-export-json" class="btn btn-secondary">⬇️ Exportar JSON</button>
+              <label class="btn btn-secondary file-btn">
+                ⬆️ Importar JSON
+                <input id="input-import-json" type="file" accept="application/json" hidden />
+              </label>
+              <button id="btn-reset-defaults" class="btn btn-danger-ghost">Restaurar base</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modal CRUD de Agente -->
+  <div id="agent-modal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="agent-modal-title">Nuevo Agente</h3>
+        <button id="agent-modal-close" class="icon-btn">✕</button>
+      </div>
+      <form id="agent-form" class="form-stack">
+        <input type="hidden" id="af-id" />
+        <div class="form-row-2">
+          <div>
+            <label class="field-label">Nombre del agente</label>
+            <input id="af-name" class="input" placeholder="Ej: Monitor Voltacel" required />
+          </div>
+          <div>
+            <label class="field-label">Rol / Subtítulo</label>
+            <input id="af-role" class="input" placeholder="Ej: Ventas Mercado Libre" required />
+          </div>
+        </div>
+
+        <div class="form-row-3">
+          <div>
+            <label class="field-label">Avatar / Estación</label>
+            <select id="af-avatar" class="input">
+              <option value="contador">💼 Contador / Finanzas</option>
+              <option value="combustible">⛽ Estación Combustible</option>
+              <option value="mecanico">🚗 Mecánico / Vehículo</option>
+              <option value="perro">🐶 Simurdiera / Social</option>
+              <option value="profesor">🧪 Profesor / Laboratorio</option>
+              <option value="bateria">🔋 Taller Baterías</option>
+              <option value="robot">🤖 Agente IA Genérico</option>
+              <option value="servidor">🖥️ Servidor / Script</option>
+              <option value="camara">📹 Vigilancia / Cámara</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-label">Tipo de Conector (Adaptador)</label>
+            <select id="af-adapter" class="input">
+              <option value="github_action">GitHub Actions (Repo + Archivo)</option>
+              <option value="google_sheet">Google Sheet genérico</option>
+              <option value="webhook_json">Webhook / Endpoint JSON</option>
+              <option value="servicios_hogar">Servicios Básicos Hogar</option>
+              <option value="combustible_copec">Control COPEC</option>
+              <option value="mg6_mecanico">Monitor Vehículo OBD-II</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-label">Estado</label>
+            <select id="af-enabled" class="input">
+              <option value="true">Activo</option>
+              <option value="false">Pausado</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Campos dinámicos según adaptador -->
+        <div id="af-dynamic-fields" class="dynamic-fields-box"></div>
+
+        <div id="af-test-result" class="feedback-msg"></div>
+
+        <div class="modal-footer">
+          <button type="button" id="af-test-btn" class="btn btn-secondary">🧪 Probar conexión</button>
+          <div class="btn-row">
+            <button type="button" id="af-cancel-btn" class="btn btn-ghost">Cancelar</button>
+            <button type="submit" class="btn btn-primary">Guardar Agente</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal CRUD de Oficina -->
+  <div id="office-modal" class="modal-backdrop hidden">
+    <div class="modal-card modal-card-sm">
+      <div class="modal-header">
+        <h3 id="office-modal-title">Nueva Oficina</h3>
+        <button id="office-modal-close" class="icon-btn">✕</button>
+      </div>
+      <form id="office-form" class="form-stack">
+        <input type="hidden" id="of-id" />
+        <div class="form-row-2">
+          <div>
+            <label class="field-label">Nombre de la oficina</label>
+            <input id="of-name" class="input" placeholder="Ej: Taller Voltacel" required />
+          </div>
+          <div>
+            <label class="field-label">Ícono (emoji)</label>
+            <input id="of-icon" class="input" value="⚡" maxlength="4" />
+          </div>
+        </div>
+        <div>
+          <label class="field-label">Descripción breve</label>
+          <input id="of-subtitle" class="input" placeholder="Ej: Baterías 12V, costos y ventas" />
+        </div>
+        <div class="modal-footer">
+          <span></span>
+          <div class="btn-row">
+            <button type="button" id="of-cancel-btn" class="btn btn-ghost">Cancelar</button>
+            <button type="submit" class="btn btn-primary">Guardar Oficina</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal Alertas Gmail -->
+  <div id="alerts-modal" class="modal-backdrop hidden">
+    <div class="modal-card modal-card-sm">
+      <div class="modal-header">
+        <h3>⚠️ Alertas recientes en Gmail</h3>
+        <button id="alerts-modal-close" class="icon-btn">✕</button>
+      </div>
+      <div id="alerts-modal-body" class="form-stack"></div>
+    </div>
+  </div>
+
+  <!-- Toast notifications -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <script type="module" src="./ui/app.js"></script>
+</body>
+</html>
