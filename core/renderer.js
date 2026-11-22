@@ -8,8 +8,8 @@
  */
 
 import { getTheme } from '../themes/themes.js';
-import { getRoomTemplate, BUILDING_FLOORPLAN } from '../config/rooms.js?v=3.6';
-import { getAvatarTemplate } from '../config/avatars.js?v=3.6';
+import { getRoomTemplate, BUILDING_FLOORPLAN } from '../config/rooms.js?v=3.7';
+import { getAvatarTemplate } from '../config/avatars.js?v=3.7';
 
 const STATUS_COLORS = {
   VERDE: '#22c55e',
@@ -19,11 +19,12 @@ const STATUS_COLORS = {
 };
 
 export class OfficeRenderer {
-  constructor(canvas, assetManager, onSelectAgent) {
+  constructor(canvas, assetManager, onSelectAgent, onBackgroundClick = null) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.assets = assetManager;
     this.onSelectAgent = onSelectAgent;
+    this.onBackgroundClick = onBackgroundClick;
 
     this.office = null;
     this.agents = [];
@@ -33,6 +34,10 @@ export class OfficeRenderer {
     this.selectedAgentId = null;
 
     this.cam = { x: 0, y: 0, zoom: 1 };
+    this.camTarget = null;
+    this.drawerOpen = false;
+    this.agentFocusTargets = new Map();
+    this.pendingFocus = null;
     this.hitBoxes = [];
     this.bubbles = new Map();
     this.agentMotion = new Map();
@@ -95,12 +100,59 @@ export class OfficeRenderer {
     });
   }
 
-  resetCamera() {
-    this.cam = { x: 0, y: 0, zoom: 1 };
+  setDrawerOpen(isOpen) {
+    this.drawerOpen = Boolean(isOpen);
+  }
+
+  getVisibleCanvasWidth() {
+    const W = this.width || 800;
+    if (this.drawerOpen && W >= 760) {
+      const drawerW = Math.min(410, W - 24) + 18;
+      return Math.max(260, W - drawerW);
+    }
+    return W;
+  }
+
+  focusAgent(agentId, drawerOpen = true) {
+    this.drawerOpen = Boolean(drawerOpen);
+    const target = this.agentFocusTargets.get(agentId);
+    if (!target) {
+      this.pendingFocus = { agentId, drawerOpen };
+      return;
+    }
+    this.pendingFocus = null;
+
+    const W = this.width || 800;
+    const H = this.height || 600;
+    const visibleW = this.getVisibleCanvasWidth();
+    const screenTargetX = visibleW / 2;
+    const screenTargetY = H * 0.50;
+
+    let z = target.zoom || 1.95;
+    if (this.layoutMode === 'open-floor') {
+      const widthFactor = Math.max(0.84, Math.min(1.14, visibleW / 620));
+      z = Math.max(1.55, Math.min(2.6, z * widthFactor));
+    }
+
+    const camX = screenTargetX - W / 2 - (target.worldX - W / 2) * z;
+    const camY = screenTargetY - H / 2 - (target.worldY - H / 2) * z;
+
+    this.camTarget = { x: camX, y: camY, zoom: z };
+  }
+
+  resetCamera(animated = true) {
+    this.pendingFocus = null;
+    if (animated) {
+      this.camTarget = { x: 0, y: 0, zoom: 1 };
+    } else {
+      this.camTarget = null;
+      this.cam = { x: 0, y: 0, zoom: 1 };
+    }
   }
 
   zoomBy(factor) {
-    this.cam.zoom = Math.max(0.6, Math.min(2.4, this.cam.zoom * factor));
+    this.camTarget = null;
+    this.cam.zoom = Math.max(0.6, Math.min(2.8, this.cam.zoom * factor));
   }
 
   resize() {
@@ -139,7 +191,8 @@ export class OfficeRenderer {
       if (this.pointers.size === 2 && this.pinchStartDist) {
         const pts = Array.from(this.pointers.values());
         const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
-        this.cam.zoom = Math.max(0.6, Math.min(2.4, this.pinchStartZoom * (dist / this.pinchStartDist)));
+        this.camTarget = null;
+        this.cam.zoom = Math.max(0.6, Math.min(2.8, this.pinchStartZoom * (dist / this.pinchStartDist)));
         this.dragMoved = true;
         return;
       }
@@ -147,7 +200,10 @@ export class OfficeRenderer {
       if (this.dragging) {
         const dx = e.clientX - this.dragStart.x;
         const dy = e.clientY - this.dragStart.y;
-        if (Math.hypot(dx, dy) > 6) this.dragMoved = true;
+        if (Math.hypot(dx, dy) > 6) {
+          this.dragMoved = true;
+          this.camTarget = null;
+        }
         this.cam.x = this.dragStart.camX + dx;
         this.cam.y = this.dragStart.camY + dy;
       }
@@ -187,6 +243,7 @@ export class OfficeRenderer {
         return;
       }
     }
+    if (this.onBackgroundClick) this.onBackgroundClick();
   }
 
   startLoop() {
@@ -194,6 +251,22 @@ export class OfficeRenderer {
       this.t += 0.03;
       if (this.remodelProgress < 1) {
         this.remodelProgress = Math.min(1, this.remodelProgress + 0.038);
+      }
+      if (this.camTarget) {
+        const ease = 0.13;
+        this.cam.x += (this.camTarget.x - this.cam.x) * ease;
+        this.cam.y += (this.camTarget.y - this.cam.y) * ease;
+        this.cam.zoom += (this.camTarget.zoom - this.cam.zoom) * ease;
+        if (
+          Math.abs(this.camTarget.x - this.cam.x) < 0.45 &&
+          Math.abs(this.camTarget.y - this.cam.y) < 0.45 &&
+          Math.abs(this.camTarget.zoom - this.cam.zoom) < 0.002
+        ) {
+          this.cam.x = this.camTarget.x;
+          this.cam.y = this.camTarget.y;
+          this.cam.zoom = this.camTarget.zoom;
+          this.camTarget = null;
+        }
       }
       this.draw();
       this.rafId = requestAnimationFrame(loop);
@@ -250,6 +323,7 @@ export class OfficeRenderer {
   // ==========================================================================
   drawUnifiedBuildingMode(ctx, theme, W, H) {
     this.hitBoxes = [];
+    this.agentFocusTargets.clear();
     const buildingImg = this.assets ? this.assets.getBuildingImage(this.office) : null;
 
     // Calcular caja de dibujo generosa respetando HUD y quickbar
@@ -358,8 +432,19 @@ export class OfficeRenderer {
       const anim = this.getAnimatedSpot(agent, spot, true);
       const ax = left + drawW * anim.x;
       const ay = top + drawH * anim.y;
+      const foc = spot.focus || { x: spot.x, y: spot.y - 0.015, zoom: 1.95 };
+      this.agentFocusTargets.set(agent.id, {
+        worldX: left + drawW * foc.x,
+        worldY: top + drawH * foc.y,
+        zoom: foc.zoom || 1.95
+      });
       return { agent, tpl, spot, anim, ax, ay };
     });
+    if (this.pendingFocus) {
+      const pf = this.pendingFocus;
+      this.pendingFocus = null;
+      this.focusAgent(pf.agentId, pf.drawerOpen);
+    }
     computed.sort((a, b) => a.ay - b.ay);
     const byIdPos = Object.fromEntries(computed.map((c) => [c.agent.id, c]));
 
@@ -501,12 +586,17 @@ export class OfficeRenderer {
       });
     });
 
-    // Dibujar los globos de texto en la capa más alta para que nunca queden tapados por otra placa
-    bubblesToDraw.forEach(({ ax, ay, bubble }) => {
-      this.drawCozySpeechBubble(ctx, ax, ay, bubble, 16, W - 16, 62);
-    });
-
     ctx.restore();
+
+    // Dibujar globos de texto en coordenadas de pantalla para que mantengan nitidez al hacer zoom
+    // y nunca queden tapados por el panel lateral de detalles
+    const maxBubbleX = this.getVisibleCanvasWidth() - 14;
+    bubblesToDraw.forEach(({ ax, ay, bubble }) => {
+      const sx = (ax - W / 2) * this.cam.zoom + W / 2 + this.cam.x;
+      const sy = (ay - H / 2) * this.cam.zoom + H / 2 + this.cam.y;
+      if (sx < -40 || sx > maxBubbleX + 40 || sy < -30 || sy > H + 30) return;
+      this.drawCozySpeechBubble(ctx, sx, sy, bubble, 14, maxBubbleX, 62);
+    });
   }
 
   drawFallbackBuildingPlan(ctx, left, top, w, h, theme) {
@@ -550,6 +640,7 @@ export class OfficeRenderer {
   // ==========================================================================
   drawCozyRoomsMode(ctx, theme, W, H) {
     this.hitBoxes = [];
+    this.agentFocusTargets.clear();
     const agents = this.agents;
     const count = agents.length;
     if (count === 0) return;
@@ -591,6 +682,14 @@ export class OfficeRenderer {
 
       this.drawCozyRoomCard(ctx, x, y, cardW, cardH, agent, theme);
 
+      const visW = this.getVisibleCanvasWidth();
+      const cardZoom = Math.max(1.12, Math.min(2.05, Math.min((visW * 0.86) / cardW, ((H - 132) * 0.84) / cardH)));
+      this.agentFocusTargets.set(agent.id, {
+        worldX: x + cardW / 2,
+        worldY: y + cardH / 2,
+        zoom: cardZoom
+      });
+
       const sx = (x - W / 2) * this.cam.zoom + W / 2 + this.cam.x;
       const sy = (y - H / 2) * this.cam.zoom + H / 2 + this.cam.y;
       this.hitBoxes.push({
@@ -603,6 +702,11 @@ export class OfficeRenderer {
     });
 
     ctx.restore();
+    if (this.pendingFocus) {
+      const pf = this.pendingFocus;
+      this.pendingFocus = null;
+      this.focusAgent(pf.agentId, pf.drawerOpen);
+    }
   }
 
   drawCozyRoomCard(ctx, x, y, w, h, agent, theme) {

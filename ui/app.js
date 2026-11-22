@@ -3,14 +3,14 @@
  * Conecta OfficeStore, RoomAssetManager, OfficeRenderer y BridgeAPI.
  */
 
-import { OfficeStore } from '../core/store.js?v=3.6';
-import { OfficeRenderer } from '../core/renderer.js?v=3.6';
-import { RoomAssetManager, compressImageFileToDataUrl } from '../core/assets.js?v=3.6';
+import { OfficeStore } from '../core/store.js?v=3.7';
+import { OfficeRenderer } from '../core/renderer.js?v=3.7';
+import { RoomAssetManager, compressImageFileToDataUrl } from '../core/assets.js?v=3.7';
 import { THEMES } from '../themes/themes.js';
-import { ROOM_TEMPLATES, BUILDING_FLOORPLAN, getRoomTemplate } from '../config/rooms.js?v=3.6';
-import { AVATAR_TEMPLATES } from '../config/avatars.js?v=3.6';
-import { parseSteamHistoryLines } from '../core/api.js?v=3.6';
-import { OfficeChatterEngine } from '../core/chatter.js?v=3.6';
+import { ROOM_TEMPLATES, BUILDING_FLOORPLAN, getRoomTemplate } from '../config/rooms.js?v=3.7';
+import { AVATAR_TEMPLATES } from '../config/avatars.js?v=3.7';
+import { parseSteamHistoryLines } from '../core/api.js?v=3.7';
+import { OfficeChatterEngine } from '../core/chatter.js?v=3.7';
 
 const store = new OfficeStore();
 let assetManager = null;
@@ -93,15 +93,23 @@ function init() {
   if ($('#cfg-chatter-mode')) $('#cfg-chatter-mode').value = String(store.state.prefs.chatterMode || 'normal');
   if ($('#cfg-avatar-motion')) $('#cfg-avatar-motion').value = String(store.state.prefs.avatarMotion !== false);
   if ($('#cfg-use-openai')) $('#cfg-use-openai').checked = store.state.prefs.useOpenAI !== false;
+  if ($('#cfg-auto-zoom')) $('#cfg-auto-zoom').checked = store.state.prefs.autoZoom !== false;
     renderAvatarsGallery();
   });
 
-  renderer = new OfficeRenderer($('#office-canvas'), assetManager, (agentId) => {
-    store.state.selectedAgentId = agentId;
-    renderQuickbar();
-    openInspector(agentId);
-    if (chatter) chatter.speakClickHighlight(agentId);
-  });
+  renderer = new OfficeRenderer(
+    $('#office-canvas'),
+    assetManager,
+    (agentId) => {
+      store.state.selectedAgentId = agentId;
+      renderQuickbar();
+      openInspector(agentId, true);
+      if (chatter) chatter.speakClickHighlight(agentId);
+    },
+    () => {
+      if (store.state.selectedAgentId) closeInspector();
+    }
+  );
 
   chatter = new OfficeChatterEngine({
     store,
@@ -242,6 +250,9 @@ function bindGlobalEvents() {
   $('#cam-zoom-out').addEventListener('click', () => renderer.zoomBy(0.85));
   $('#cam-reset').addEventListener('click', () => renderer.resetCamera());
   $('#drawer-close').addEventListener('click', closeInspector);
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && store.state.selectedAgentId) closeInspector();
+  });
 
   $('#drawer-edit-room').addEventListener('click', () => {
     if (!store.state.selectedAgentId) return;
@@ -397,9 +408,13 @@ function renderQuickbar() {
 
   $$('#agent-quickbar .quick-chip').forEach((btn) => {
     btn.addEventListener('click', () => {
+      if (store.state.selectedAgentId === btn.dataset.agent && !$('#inspector-drawer').classList.contains('closed')) {
+        closeInspector();
+        return;
+      }
       store.state.selectedAgentId = btn.dataset.agent;
       renderQuickbar();
-      openInspector(btn.dataset.agent);
+      openInspector(btn.dataset.agent, true);
       if (chatter) chatter.speakClickHighlight(btn.dataset.agent);
       renderer.setScene({
         office,
@@ -430,12 +445,28 @@ function openInspector(agentId, openDrawer = true) {
   $('#drawer-body').innerHTML = buildAgentDetailHTML(agent, live);
 
   bindAgentDetailActions($('#drawer-body'), agent);
-  if (openDrawer) $('#inspector-drawer').classList.remove('closed');
+  if (openDrawer) {
+    $('#inspector-drawer').classList.remove('closed');
+    $('#view-office').classList.add('drawer-open');
+    renderer.setDrawerOpen(true);
+    if (store.state.prefs.autoZoom !== false) {
+      renderer.focusAgent(agentId, true);
+    }
+  }
 }
 
 function closeInspector() {
+  const wasOpen = !$('#inspector-drawer').classList.contains('closed');
   store.state.selectedAgentId = null;
   $('#inspector-drawer').classList.add('closed');
+  $('#view-office').classList.remove('drawer-open');
+  if (renderer) {
+    renderer.setDrawerOpen(false);
+    renderer.selectedAgentId = null;
+    if (wasOpen && store.state.prefs.autoZoom !== false) {
+      renderer.resetCamera(true);
+    }
+  }
   renderQuickbar();
 }
 
@@ -1198,6 +1229,7 @@ function renderDesignPanel() {
   if ($('#cfg-chatter-mode')) $('#cfg-chatter-mode').value = String(store.state.prefs.chatterMode || 'normal');
   if ($('#cfg-avatar-motion')) $('#cfg-avatar-motion').value = String(store.state.prefs.avatarMotion !== false);
   if ($('#cfg-use-openai')) $('#cfg-use-openai').checked = store.state.prefs.useOpenAI !== false;
+  if ($('#cfg-auto-zoom')) $('#cfg-auto-zoom').checked = store.state.prefs.autoZoom !== false;
 
   if (document.activeElement !== $('#cfg-bridge-url')) $('#cfg-bridge-url').value = store.state.bridgeUrl;
   if (document.activeElement !== $('#cfg-api-secret')) $('#cfg-api-secret').value = store.state.apiSecret;
@@ -1230,6 +1262,12 @@ function bindDesignView() {
     store.state.prefs.useOpenAI = e.target.checked;
     store.saveLocalPrefs();
     if (chatter) chatter.refreshFromOpenAI(e.target.checked);
+  });
+
+  $('#cfg-auto-zoom').addEventListener('change', (e) => {
+    store.state.prefs.autoZoom = e.target.checked;
+    store.saveLocalPrefs();
+    toast(e.target.checked ? 'Zoom automático al cubículo activado' : 'Zoom automático desactivado');
   });
 
   $('#btn-refresh-chatter').addEventListener('click', async () => {

@@ -974,3 +974,24 @@ body.kiosk .app-shell {
 }
 
 .pre-line { white-space: pre-line; }
+
+
+/* ==========================================================================
+   V3.7 AUTO-ZOOM A CUBÍCULO + AJUSTE DE CONTROLES CON PANEL DE DETALLES ABIERTO
+   ========================================================================== */
+.camera-controls,
+.agent-quickbar {
+  transition: left 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+              right 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+              max-width 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (min-width: 760px) {
+  #view-office.drawer-open .camera-controls {
+    right: calc(min(410px, calc(100% - 24px)) + 24px);
+  }
+  #view-office.drawer-open .agent-quickbar {
+    left: calc((100% - min(410px, calc(100% - 24px)) - 12px) / 2);
+    max-width: calc(100% - min(410px, calc(100% - 24px)) - 44px);
+  }
+}

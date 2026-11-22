@@ -12,6 +12,7 @@ export const BUILDING_FLOORPLAN = {
   roomSpots: {
     'estudio-madera': {
       x: 0.245, y: 0.455, zone: 'Estudio Madera',
+      focus: { x: 0.255, y: 0.450, zoom: 1.95 },
       patrol: [
         { x: 0.245, y: 0.455, icon: '📊' },
         { x: 0.282, y: 0.412, icon: '📚' },
@@ -20,6 +21,7 @@ export const BUILDING_FLOORPLAN = {
     },
     'oficina-ruta': {
       x: 0.520, y: 0.310, zone: 'Café y Ruta',
+      focus: { x: 0.525, y: 0.305, zoom: 2.00 },
       patrol: [
         { x: 0.520, y: 0.310, icon: '☕' },
         { x: 0.488, y: 0.315, icon: '🗺️' },
@@ -28,6 +30,7 @@ export const BUILDING_FLOORPLAN = {
     },
     'garage-cozy': {
       x: 0.695, y: 0.460, zone: 'Garage Cozy',
+      focus: { x: 0.750, y: 0.465, zoom: 1.95 },
       patrol: [
         { x: 0.695, y: 0.460, icon: '🔧' },
         { x: 0.742, y: 0.418, icon: '🛠️' },
@@ -36,6 +39,7 @@ export const BUILDING_FLOORPLAN = {
     },
     'living-gamer': {
       x: 0.355, y: 0.655, zone: 'Living Gamer',
+      focus: { x: 0.365, y: 0.645, zoom: 1.95 },
       patrol: [
         { x: 0.355, y: 0.655, icon: '🎧' },
         { x: 0.392, y: 0.688, icon: '💬' },
@@ -44,6 +48,7 @@ export const BUILDING_FLOORPLAN = {
     },
     'lab-retro': {
       x: 0.615, y: 0.660, zone: 'Lab Retro',
+      focus: { x: 0.620, y: 0.645, zoom: 1.95 },
       patrol: [
         { x: 0.615, y: 0.660, icon: '🧪' },
         { x: 0.642, y: 0.618, icon: '✨' },
@@ -52,6 +57,7 @@ export const BUILDING_FLOORPLAN = {
     },
     'taller-electronica': {
       x: 0.478, y: 0.495, zone: 'Atrio Central',
+      focus: { x: 0.478, y: 0.495, zoom: 1.95 },
       patrol: [
         { x: 0.478, y: 0.495, icon: '⚡' },
         { x: 0.455, y: 0.515, icon: '🔋' }
@@ -59,6 +65,7 @@ export const BUILDING_FLOORPLAN = {
     },
     'estudio-minimal': {
       x: 0.410, y: 0.535, zone: 'Pasillo Oeste',
+      focus: { x: 0.410, y: 0.535, zoom: 1.95 },
       patrol: [
         { x: 0.410, y: 0.535, icon: '✨' },
         { x: 0.440, y: 0.515, icon: '📋' }
