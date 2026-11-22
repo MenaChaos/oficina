@@ -62,6 +62,7 @@ export class BridgeAPI {
     return this.post('trigger_workflow', { owner, repo, workflowId, branch, inputs });
   }
   testAgent(agent) { return this.post('test_agent', { agent }); }
+  getChatter(force = false) { return this.get('chatter', force ? { force: '1' } : {}); }
 }
 
 export function parseSteamHistoryLines(lines = []) {

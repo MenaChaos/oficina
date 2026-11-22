@@ -7,7 +7,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black" />
   <meta name="apple-mobile-web-app-title" content="Oficina OS" />
   <title>MenaChaos OS — Oficina Virtual Cozy</title>
-  <link rel="stylesheet" href="./styles.css?v=3.5" />
+  <link rel="stylesheet" href="./styles.css?v=3.6" />
 </head>
 <body>
   <div id="dim-overlay" class="dim-overlay" aria-hidden="true"></div>
@@ -64,6 +64,7 @@
       </nav>
 
       <div class="topbar-right">
+        <button id="btn-spark-chat" class="icon-btn" title="Hacer conversar a los agentes ahora">💬</button>
         <button id="btn-layout-toggle" class="icon-btn" title="Cambiar entre Edificio Completo y Salas Separadas">🪟</button>
         <button id="alerts-pill" class="pill-btn hidden" title="Alertas de sistema (Gmail)">
           ⚠️ <span id="alerts-count">0</span>
@@ -225,6 +226,41 @@
                 <button id="btn-test-ping" class="btn btn-secondary">Probar Ping</button>
               </div>
               <div id="conn-feedback" class="feedback-msg"></div>
+            </div>
+
+            <hr class="divider" />
+            <h3>💬 Vida de Oficina y Diálogos (OpenAI opcional)</h3>
+            <p class="muted small">Los personajes caminan por su sala, trabajan con íconos, conversan entre sí y destacan lo importante al tocarlos. Si agregas <code>OPENAI_API_KEY</code> en Apps Script, los diálogos se redactan con IA (<code>gpt-4o-mini</code>) en lotes cada 30 min.</p>
+            <div class="form-stack">
+              <div class="form-row-2">
+                <div>
+                  <label class="field-label">Frecuencia de globos</label>
+                  <select id="cfg-chatter-mode" class="input">
+                    <option value="lively">Animado (cada ~10 s)</option>
+                    <option value="normal">Normal (cada ~15 s)</option>
+                    <option value="calm">Tranquilo (cada ~25 s)</option>
+                    <option value="off">Solo al hacer clic</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="field-label">Movimiento en salas</label>
+                  <select id="cfg-avatar-motion" class="input">
+                    <option value="true">Activo (caminan y trabajan)</option>
+                    <option value="false">Quieto en su puesto</option>
+                  </select>
+                </div>
+              </div>
+              <div class="btn-row">
+                <label class="small" style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                  <input id="cfg-use-openai" type="checkbox" checked />
+                  Usar OpenAI si está configurado en Apps Script
+                </label>
+              </div>
+              <div class="btn-row">
+                <button id="btn-refresh-chatter" class="btn btn-secondary">✨ Renovar diálogos ahora</button>
+                <button id="btn-test-convo" class="btn btn-secondary">💬 Probar conversación</button>
+              </div>
+              <div id="chatter-status" class="feedback-msg">Motor local activo</div>
             </div>
 
             <hr class="divider" />
@@ -410,6 +446,6 @@
 
   <div id="toast-container" class="toast-container"></div>
 
-  <script type="module" src="./ui/app.js?v=3.5"></script>
+  <script type="module" src="./ui/app.js?v=3.6"></script>
 </body>
 </html>

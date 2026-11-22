@@ -8,8 +8,8 @@
  */
 
 import { getTheme } from '../themes/themes.js';
-import { getRoomTemplate, BUILDING_FLOORPLAN } from '../config/rooms.js?v=3.4';
-import { getAvatarTemplate } from '../config/avatars.js?v=3.4';
+import { getRoomTemplate, BUILDING_FLOORPLAN } from '../config/rooms.js?v=3.6';
+import { getAvatarTemplate } from '../config/avatars.js?v=3.6';
 
 const STATUS_COLORS = {
   VERDE: '#22c55e',
@@ -35,6 +35,8 @@ export class OfficeRenderer {
     this.cam = { x: 0, y: 0, zoom: 1 };
     this.hitBoxes = [];
     this.bubbles = new Map();
+    this.agentMotion = new Map();
+    this.motionEnabled = true;
     this.remodelProgress = 1;
 
     // Partículas ambientales cálidas
@@ -61,7 +63,8 @@ export class OfficeRenderer {
     this.startLoop();
   }
 
-  setScene({ office, agents, agentData, themeId, layoutMode, selectedAgentId, triggerRemodel = false }) {
+  setScene({ office, agents, agentData, themeId, layoutMode, selectedAgentId, motionEnabled, triggerRemodel = false }) {
+    if (motionEnabled !== undefined) this.motionEnabled = motionEnabled;
     if (office !== undefined) this.office = office;
     this.agents = agents || [];
     this.agentData = agentData || {};
@@ -81,8 +84,15 @@ export class OfficeRenderer {
     }
   }
 
-  say(agentId, text, durationMs = 4800) {
-    this.bubbles.set(agentId, { text, until: performance.now() + durationMs });
+  say(agentId, text, durationMs = 5400, tone = 'chat', targetAgentId = null) {
+    const now = performance.now();
+    this.bubbles.set(agentId, {
+      text: String(text || ''),
+      since: now,
+      until: now + durationMs,
+      tone,
+      targetAgentId
+    });
   }
 
   resetCamera() {
@@ -343,7 +353,40 @@ export class OfficeRenderer {
 
     const charScale = Math.max(0.72, Math.min(1.12, drawW / 1080));
 
-    placements.forEach(({ agent, tpl, spot }) => {
+    // Calcular posición animada de cada personaje para poder trazar arcos de conversación y ordenar por Y
+    const computed = placements.map(({ agent, tpl, spot }) => {
+      const anim = this.getAnimatedSpot(agent, spot, true);
+      const ax = left + drawW * anim.x;
+      const ay = top + drawH * anim.y;
+      return { agent, tpl, spot, anim, ax, ay };
+    });
+    computed.sort((a, b) => a.ay - b.ay);
+    const byIdPos = Object.fromEntries(computed.map((c) => [c.agent.id, c]));
+
+    // Arco sutil luminoso entre dos colegas cuando están conversando
+    const nowMs = performance.now();
+    computed.forEach(({ agent, ax, ay }) => {
+      const b = this.bubbles.get(agent.id);
+      if (b && b.until > nowMs && b.targetAgentId && byIdPos[b.targetAgentId]) {
+        const tgt = byIdPos[b.targetAgentId];
+        ctx.save();
+        ctx.strokeStyle = 'rgba(244, 162, 97, 0.42)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.lineDashOffset = -this.t * 14;
+        ctx.beginPath();
+        const midX = (ax + tgt.ax) / 2;
+        const midY = Math.min(ay, tgt.ay) - 42 * charScale;
+        ctx.moveTo(ax, ay - 36 * charScale);
+        ctx.quadraticCurveTo(midX, midY, tgt.ax, tgt.ay - 36 * charScale);
+        ctx.stroke();
+        ctx.restore();
+      }
+    });
+
+    const bubblesToDraw = [];
+
+    computed.forEach(({ agent, tpl, spot, anim, ax, ay }) => {
       const live = this.agentData[agent.id] || {};
       const status = agent.enabled === false ? 'PAUSADO' : live.status || 'VERDE';
       const activity = agent.enabled === false ? 'idle' : live.activity || 'idle';
@@ -351,9 +394,13 @@ export class OfficeRenderer {
       const statusColor = STATUS_COLORS[status] || STATUS_COLORS.VERDE;
       const accentColor = agent.roomAccent || tpl.accent;
 
-      const bob = activity === 'working' ? Math.abs(Math.sin(this.t * 6.5)) * 4.5 : Math.sin(this.t * 2.2 + spot.x * 12) * 1.8;
-      const ax = left + drawW * spot.x;
-      const ay = top + drawH * spot.y;
+      const bubble = this.bubbles.get(agent.id);
+      const isSpeaking = Boolean(bubble && bubble.until > nowMs);
+
+      const walkHop = anim.isWalking ? Math.abs(Math.sin(this.t * 9.5)) * 6.5 : 0;
+      const talkHop = isSpeaking ? Math.abs(Math.sin(this.t * 6.0)) * 3.0 : 0;
+      const idleBob = activity === 'working' ? Math.abs(Math.sin(this.t * 5.8)) * 3.8 : Math.sin(this.t * 2.2 + spot.x * 12) * 1.4;
+      const bob = Math.max(walkHop, talkHop, idleBob);
 
       // Halo sutil de selección o alerta en el piso de la estancia
       if (isSelected || status === 'ROJO' || activity === 'working') {
@@ -363,7 +410,7 @@ export class OfficeRenderer {
         ctx.fillStyle = isSelected ? accentColor : statusColor;
         ctx.globalAlpha = 0.16 * ringPulse;
         ctx.beginPath();
-        ctx.ellipse(ax, ay + 10 * charScale, 38 * charScale, 20 * charScale, 0, 0, Math.PI * 2);
+        ctx.ellipse(ax, ay + 6 * charScale, 36 * charScale, 18 * charScale, 0, 0, Math.PI * 2);
         ctx.fill();
         ctx.globalAlpha = 0.82;
         ctx.lineWidth = 2;
@@ -371,12 +418,32 @@ export class OfficeRenderer {
         ctx.restore();
       }
 
-      // Personaje vivo dentro de su cubículo/estancia
-      this.drawCozyCharacter(ctx, ax, ay, bob, charScale, agent, status, activity, true);
+      // Personaje vivo caminando/trabajando dentro de su estancia
+      this.drawCozyCharacter(ctx, ax, ay, bob, charScale, agent, status, activity, true, anim);
 
-      // Placa compacta con nombre + semáforo + dato vivo justo debajo del personaje
+      // Icono flotante discreto de "trabajando" cuando NO hay globo de diálogo activo
+      if (this.motionEnabled && !isSpeaking && !anim.isWalking && agent.enabled !== false) {
+        const iconPhase = Math.sin(this.t * 1.7 + spot.x * 15);
+        if (iconPhase > 0.15) {
+          ctx.save();
+          ctx.globalAlpha = Math.min(0.88, (iconPhase - 0.15) * 1.2);
+          const floatY = ay - (78 + iconPhase * 8) * charScale;
+          ctx.fillStyle = 'rgba(20, 21, 25, 0.72)';
+          ctx.beginPath();
+          ctx.arc(ax + 24 * charScale, floatY, 11 * charScale, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.font = `${Math.round(11 * charScale)}px -apple-system, sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(anim.workIcon || '✨', ax + 24 * charScale, floatY + 1);
+          ctx.restore();
+        }
+      }
+
+      // Placa fija en el centro del cubículo (no rebota mientras camina el personaje)
+      const plateAnchorX = left + drawW * spot.x;
+      const plateAnchorY = top + drawH * spot.y + 24 * charScale;
       const shortInfo = this.getShortHeadline(agent, live);
-      const plateY = ay + 24 * charScale;
       ctx.font = '800 11.2px -apple-system, BlinkMacSystemFont, sans-serif';
       const titleW = ctx.measureText(agent.name).width;
       ctx.font = '500 9.6px -apple-system, BlinkMacSystemFont, sans-serif';
@@ -390,7 +457,7 @@ export class OfficeRenderer {
       ctx.shadowBlur = 10;
       ctx.fillStyle = 'rgba(20, 21, 25, 0.90)';
       ctx.beginPath();
-      ctx.roundRect(ax - plateW / 2, plateY - plateH / 2, plateW, plateH, 10);
+      ctx.roundRect(plateAnchorX - plateW / 2, plateAnchorY - plateH / 2, plateW, plateH, 10);
       ctx.fill();
       ctx.shadowBlur = 0;
 
@@ -398,47 +465,31 @@ export class OfficeRenderer {
       ctx.lineWidth = isSelected || status === 'ROJO' ? 1.8 : 1;
       ctx.stroke();
 
-      // Punto de semáforo
       ctx.fillStyle = statusColor;
       ctx.beginPath();
-      ctx.arc(ax - plateW / 2 + 12, plateY - 6, status === 'ROJO' ? 4.1 + Math.sin(this.t * 6) * 0.9 : 3.6, 0, Math.PI * 2);
+      ctx.arc(plateAnchorX - plateW / 2 + 12, plateAnchorY - 6, status === 'ROJO' ? 4.1 + Math.sin(this.t * 6) * 0.9 : 3.6, 0, Math.PI * 2);
       ctx.fill();
 
-      // Nombre
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       ctx.font = '800 11.2px -apple-system, BlinkMacSystemFont, sans-serif';
       ctx.fillStyle = '#fbf6ee';
-      ctx.fillText(this.truncateText(ctx, agent.name, plateW - 26), ax - plateW / 2 + 21, plateY - 6);
+      ctx.fillText(this.truncateText(ctx, agent.name, plateW - 26), plateAnchorX - plateW / 2 + 21, plateAnchorY - 6);
 
-      // Dato vivo
       ctx.font = '500 9.6px -apple-system, BlinkMacSystemFont, sans-serif';
       ctx.fillStyle = status === 'ROJO' ? '#fca5a5' : status === 'AMARILLO' ? '#fcd34d' : '#c5bbb0';
-      ctx.fillText(subText, ax - plateW / 2 + 11, plateY + 8);
+      ctx.fillText(subText, plateAnchorX - plateW / 2 + 11, plateAnchorY + 8);
       ctx.restore();
 
-      // Burbuja de diálogo temporal
-      const bubble = this.bubbles.get(agent.id);
-      if (bubble && bubble.until > performance.now()) {
-        ctx.font = '700 10.5px -apple-system, sans-serif';
-        const bText = this.truncateText(ctx, bubble.text, 175);
-        const bw = ctx.measureText(bText).width + 18;
-        const by = ay - 88 * charScale;
-        ctx.fillStyle = '#fffdf8';
-        ctx.beginPath();
-        ctx.roundRect(ax - bw / 2, by, bw, 22, 9);
-        ctx.fill();
-        ctx.fillStyle = '#1f1a17';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(bText, ax, by + 11);
+      if (isSpeaking) {
+        bubblesToDraw.push({ ax, ay: ay - 78 * charScale, bubble });
       }
 
-      // Hitbox generosa que cubre todo el cubículo + placa
-      const hitW = Math.max(plateW, 130 * charScale);
-      const hitH = 136 * charScale;
-      const hx = ax - hitW / 2;
-      const hy = ay - 82 * charScale;
+      // Hitbox generosa que cubre al personaje y su placa
+      const hitW = Math.max(plateW, 134 * charScale);
+      const hitH = 140 * charScale;
+      const hx = Math.min(ax, plateAnchorX) - hitW * 0.42;
+      const hy = Math.min(ay - 84 * charScale, plateAnchorY - 50 * charScale);
       const sx = (hx - W / 2) * this.cam.zoom + W / 2 + this.cam.x;
       const sy = (hy - H / 2) * this.cam.zoom + H / 2 + this.cam.y;
       this.hitBoxes.push({
@@ -448,6 +499,11 @@ export class OfficeRenderer {
         w: hitW * this.cam.zoom,
         h: hitH * this.cam.zoom
       });
+    });
+
+    // Dibujar los globos de texto en la capa más alta para que nunca queden tapados por otra placa
+    bubblesToDraw.forEach(({ ax, ay, bubble }) => {
+      this.drawCozySpeechBubble(ctx, ax, ay, bubble, 16, W - 16, 62);
     });
 
     ctx.restore();
@@ -608,11 +664,16 @@ export class OfficeRenderer {
     ctx.fillRect(x, y + h * 0.55, w, h * 0.46);
 
     const anchor = agent.charAnchor || tpl.defaultAnchor || { x: 0.5, y: 0.65 };
-    const bob = activity === 'working' ? Math.abs(Math.sin(this.t * 6.5)) * 4.5 : Math.sin(this.t * 2.2 + x * 0.02) * 2;
-    const cx = x + w * anchor.x;
-    const cy = y + h * anchor.y - bob;
+    const anim = this.getAnimatedSpot(agent, anchor, false);
+    const bubbleNow = this.bubbles.get(agent.id);
+    const isSpeaking = Boolean(bubbleNow && bubbleNow.until > performance.now());
+    const walkHop = anim.isWalking ? Math.abs(Math.sin(this.t * 9.5)) * 5.5 : 0;
+    const talkHop = isSpeaking ? Math.abs(Math.sin(this.t * 6.0)) * 2.8 : 0;
+    const bob = Math.max(walkHop, talkHop, activity === 'working' ? Math.abs(Math.sin(this.t * 6.0)) * 3.8 : Math.sin(this.t * 2.2 + x * 0.02) * 1.6);
+    const cx = x + w * anim.x;
+    const cy = y + h * anim.y;
     const charScale = Math.max(0.78, Math.min(1.18, w / 290));
-    this.drawCozyCharacter(ctx, cx, cy + bob, bob, charScale, agent, status, activity, false);
+    this.drawCozyCharacter(ctx, cx, cy, bob, charScale, agent, status, activity, false, anim);
 
     const pillText = status;
     ctx.font = '800 9.5px -apple-system, BlinkMacSystemFont, sans-serif';
@@ -662,18 +723,7 @@ export class OfficeRenderer {
 
     const bubble = this.bubbles.get(agent.id);
     if (bubble && bubble.until > performance.now()) {
-      ctx.font = '700 11px -apple-system, sans-serif';
-      const bText = this.truncateText(ctx, bubble.text, w - 36);
-      const bw = ctx.measureText(bText).width + 20;
-      const bx = Math.max(x + 10, Math.min(x + w - bw - 10, cx - bw / 2));
-      const by = Math.max(y + 38, cy - 84 * charScale);
-      ctx.fillStyle = '#fffdf8';
-      ctx.beginPath();
-      ctx.roundRect(bx, by, bw, 24, 10);
-      ctx.fill();
-      ctx.fillStyle = '#1f1a17';
-      ctx.textAlign = 'center';
-      ctx.fillText(bText, bx + bw / 2, by + 12.5);
+      this.drawCozySpeechBubble(ctx, cx, cy - 78 * charScale, bubble, x + 8, x + w - 8, y + 36);
     }
 
     ctx.restore();
@@ -700,7 +750,7 @@ export class OfficeRenderer {
     this.drawPoly(ctx, [{ x: cx, y: cy - s * 0.45 }, { x: cx + s, y: cy + s * 0.05 }, { x: cx + s, y: cy - s * 0.68 }, { x: cx, y: cy - s * 1.18 }], '#3a322c', 'rgba(0,0,0,0.2)', 1);
   }
 
-  drawCozyCharacter(ctx, footX, footY, bob, scale, agent, status, activity, isBuildingMode) {
+  drawCozyCharacter(ctx, footX, footY, bob, scale, agent, status, activity, isBuildingMode, anim = null) {
     const avatar = agent.avatar || 'robot';
     const avTpl = getAvatarTemplate(avatar);
     const sprite = this.assets ? this.assets.getAvatarSpriteForAgent(agent) : null;
@@ -739,11 +789,16 @@ export class OfficeRenderer {
       const drawH = baseH * breathe;
       const drawW = drawH * aspect;
 
+      const facing = anim && anim.facing ? anim.facing : 1;
+      const tilt = anim && anim.isWalking ? Math.sin(this.t * 9.5) * 0.065 : 0;
       ctx.save();
+      ctx.translate(0, -bob);
+      ctx.rotate(tilt);
+      if (facing < 0) ctx.scale(-1, 1);
       ctx.shadowColor = 'rgba(0, 0, 0, 0.42)';
       ctx.shadowBlur = 10;
       ctx.shadowOffsetY = 4;
-      ctx.drawImage(sprite, -drawW / 2, -drawH + 4 * scale - bob, drawW, drawH);
+      ctx.drawImage(sprite, -drawW / 2, -drawH + 4 * scale, drawW, drawH);
       ctx.restore();
 
       ctx.restore();
@@ -797,6 +852,187 @@ export class OfficeRenderer {
       ctx.roundRect(9, -19, 4.5, 10, 2.5);
       ctx.fill();
     }
+
+    ctx.restore();
+  }
+
+
+  getAnimatedSpot(agent, baseSpot, isBuildingMode) {
+    const patrol = isBuildingMode && Array.isArray(baseSpot.patrol) && baseSpot.patrol.length > 0
+      ? baseSpot.patrol
+      : [{ x: baseSpot.x, y: baseSpot.y, icon: '✨' }];
+
+    if (!this.motionEnabled || agent.enabled === false) {
+      return { x: baseSpot.x, y: baseSpot.y, isWalking: false, facing: 1, workIcon: patrol[0].icon || '✨' };
+    }
+
+    const now = performance.now();
+    let m = this.agentMotion.get(agent.id);
+    if (!m || m.mode !== isBuildingMode) {
+      m = {
+        mode: isBuildingMode,
+        x: patrol[0].x,
+        y: patrol[0].y,
+        fromX: patrol[0].x,
+        fromY: patrol[0].y,
+        targetX: patrol[0].x,
+        targetY: patrol[0].y,
+        wpIdx: 0,
+        phase: 'work', // 'work' | 'walk'
+        phaseStart: now,
+        phaseDur: 3500 + Math.random() * 5500,
+        facing: 1,
+        workIcon: patrol[0].icon || '✨'
+      };
+      this.agentMotion.set(agent.id, m);
+    }
+
+    // Si está hablando ahora mismo, pausar la caminata para que se vea conversando
+    const activeBubble = this.bubbles.get(agent.id);
+    const isSpeaking = activeBubble && activeBubble.until > now;
+
+    if (m.phase === 'walk') {
+      const prog = Math.min(1, (now - m.phaseStart) / m.phaseDur);
+      // Ease in-out suave
+      const e = prog < 0.5 ? 2 * prog * prog : 1 - Math.pow(-2 * prog + 2, 2) / 2;
+      m.x = m.fromX + (m.targetX - m.fromX) * e;
+      m.y = m.fromY + (m.targetY - m.fromY) * e;
+      if (prog >= 1) {
+        m.phase = 'work';
+        m.phaseStart = now;
+        m.phaseDur = 5500 + Math.random() * 6500;
+      }
+      return { x: m.x, y: m.y, isWalking: true, facing: m.facing, workIcon: m.workIcon };
+    }
+
+    // En fase 'work': al terminar el tiempo y si no está hablando, caminar a otro punto de la sala
+    if (!isSpeaking && now - m.phaseStart >= m.phaseDur) {
+      if (isBuildingMode && patrol.length > 1) {
+        let nextIdx = (m.wpIdx + 1 + Math.floor(Math.random() * (patrol.length - 1))) % patrol.length;
+        const wp = patrol[nextIdx];
+        m.wpIdx = nextIdx;
+        m.fromX = m.x;
+        m.fromY = m.y;
+        m.targetX = wp.x;
+        m.targetY = wp.y;
+        m.workIcon = wp.icon || '✨';
+        if (Math.abs(wp.x - m.x) > 0.004) m.facing = wp.x >= m.x ? 1 : -1;
+        m.phase = 'walk';
+        m.phaseStart = now;
+        m.phaseDur = 1900 + Math.random() * 900;
+      } else if (!isBuildingMode) {
+        // Pequeño paseo local en tarjetas separadas
+        const dx = (Math.random() - 0.5) * 0.07;
+        const dy = (Math.random() - 0.5) * 0.03;
+        m.fromX = m.x;
+        m.fromY = m.y;
+        m.targetX = Math.max(0.22, Math.min(0.78, baseSpot.x + dx));
+        m.targetY = Math.max(0.56, Math.min(0.73, baseSpot.y + dy));
+        if (Math.abs(m.targetX - m.x) > 0.005) m.facing = m.targetX >= m.x ? 1 : -1;
+        m.phase = 'walk';
+        m.phaseStart = now;
+        m.phaseDur = 1800 + Math.random() * 800;
+      } else {
+        m.phaseStart = now;
+      }
+    }
+
+    return { x: m.x, y: m.y, isWalking: false, facing: m.facing, workIcon: m.workIcon };
+  }
+
+  wrapBubbleLines(ctx, text, maxW, maxLines = 3) {
+    const words = String(text || '').split(/\s+/).filter(Boolean);
+    const lines = [];
+    let current = '';
+    for (let i = 0; i < words.length; i++) {
+      const test = current ? current + ' ' + words[i] : words[i];
+      if (ctx.measureText(test).width <= maxW) {
+        current = test;
+      } else {
+        if (current) lines.push(current);
+        current = words[i];
+        if (lines.length >= maxLines - 1) {
+          const rest = [current, ...words.slice(i + 1)].join(' ');
+          lines.push(this.truncateText(ctx, rest, maxW));
+          return lines;
+        }
+      }
+    }
+    if (current) lines.push(current);
+    return lines.slice(0, maxLines);
+  }
+
+  drawCozySpeechBubble(ctx, anchorX, anchorY, bubble, minX, maxX, minY) {
+    const now = performance.now();
+    if (!bubble || bubble.until <= now) return;
+
+    const age = now - (bubble.since || 0);
+    const remain = bubble.until - now;
+    const alpha = Math.min(1, age / 220, remain / 320);
+    const popScale = age < 220 ? 0.88 + 0.12 * (age / 220) : 1;
+
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, alpha);
+    ctx.font = '700 11px -apple-system, BlinkMacSystemFont, sans-serif';
+
+    const maxInnerW = Math.min(205, Math.max(120, (maxX - minX) - 26));
+    const lines = this.wrapBubbleLines(ctx, bubble.text, maxInnerW, 3);
+    const lineH = 14.5;
+    let widest = 0;
+    lines.forEach((l) => { widest = Math.max(widest, ctx.measureText(l).width); });
+
+    const padX = 11;
+    const padY = 7;
+    const bw = Math.max(72, Math.min(maxInnerW + padX * 2, widest + padX * 2));
+    const bh = lines.length * lineH + padY * 2;
+
+    const bx = Math.max(minX, Math.min(maxX - bw, anchorX - bw / 2));
+    const by = Math.max(minY, anchorY - bh - 10);
+    const tailX = Math.max(bx + 14, Math.min(bx + bw - 14, anchorX));
+
+    ctx.translate(tailX, by + bh);
+    ctx.scale(popScale, popScale);
+    ctx.translate(-tailX, -(by + bh));
+
+    const isAlert = bubble.tone === 'alert';
+    const isHighlight = bubble.tone === 'highlight';
+
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
+    ctx.shadowBlur = 12;
+    ctx.shadowOffsetY = 4;
+
+    ctx.fillStyle = isAlert ? '#fef2f2' : '#fffaf0';
+    ctx.strokeStyle = isAlert ? '#ef4444' : isHighlight ? '#f59e0b' : '#e6ccb2';
+    ctx.lineWidth = isAlert || isHighlight ? 2 : 1.4;
+
+    ctx.beginPath();
+    ctx.roundRect(bx, by, bw, bh, 12);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.stroke();
+
+    // Colita del globo apuntando al personaje
+    ctx.fillStyle = isAlert ? '#fef2f2' : '#fffaf0';
+    ctx.beginPath();
+    ctx.moveTo(tailX - 6, by + bh - 1);
+    ctx.lineTo(tailX + 6, by + bh - 1);
+    ctx.lineTo(tailX, by + bh + 7);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = isAlert ? '#ef4444' : isHighlight ? '#f59e0b' : '#e6ccb2';
+    ctx.beginPath();
+    ctx.moveTo(tailX - 6, by + bh);
+    ctx.lineTo(tailX, by + bh + 7);
+    ctx.lineTo(tailX + 6, by + bh);
+    ctx.stroke();
+
+    // Texto centrado nítido
+    ctx.fillStyle = isAlert ? '#7f1d1d' : '#261d17';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    lines.forEach((line, idx) => {
+      ctx.fillText(line, bx + bw / 2, by + padY + lineH * (idx + 0.5));
+    });
 
     ctx.restore();
   }

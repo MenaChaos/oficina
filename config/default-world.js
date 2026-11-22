@@ -158,6 +158,7 @@ export const DEMO_DATA = {
       resumenEstado: 'Viaje tipo prueba estacionado en Jorge Prat, Andacollo, con motor frío (37°C). Presión de riel GDI 4410 kPa, mezcla -5.34% y voltaje 14.54 V estable.',
       tendenciaHistorica: 'Promedio real 3 meses: 6.64 km/L global y 8.47 km/L en movimiento. Trim consistente con histórico (-4.31%).',
       accionRecomendada: 'En VERDE: evita dejar el motor en ralentí solo para pruebas cortas.',
+      detalleUltimoViaje: 'Ruta: Jorge Prat, Andacollo -> Jorge Prat, Andacollo (prueba estacionado) | 0.38 min | 0.0 km | 0.005 L ($8 CLP a $1680/L)\n\n• 0:00 - 0:23 (Prueba estacionado en ralentí con motor frío — 0.0 km):\nUbicación Jorge Prat, Andacollo a ~1056 m s.n.m., motor parte frío a 37.0°C, RPM promedio 862 rpm, riel GDI 4410 kPa y voltaje estable 14.54 V.',
       ultimoViaje: { resumen: 'Prueba corta en ralentí (0,38 min)', fecha: '2026-11-21 14:23:16', duracionMin: '0.38', distanciaKm: '0', rendimientoKmL: '0', boostMaxPSI: '-8.99', velMaxKmh: '0', tempMaxC: '37', voltajeMinV: '14.54' },
       dia: { fecha: '2026-11-21', encendidos: '2', distanciaKm: '0.03', duracionMin: '2.6', combustibleL: '0.044', rendimientoKmL: '0.68' }
     },

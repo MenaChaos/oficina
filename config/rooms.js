@@ -10,13 +10,60 @@ export const BUILDING_FLOORPLAN = {
   aspectRatio: 16 / 9,
   // Coordenadas normalizadas (0..1) donde apoyan los pies de cada personaje en edificio-cozy.jpg
   roomSpots: {
-    'estudio-madera':     { x: 0.245, y: 0.455, zone: 'Estudio Madera' },
-    'oficina-ruta':       { x: 0.520, y: 0.310, zone: 'Café y Ruta' },
-    'garage-cozy':        { x: 0.695, y: 0.460, zone: 'Garage Cozy' },
-    'living-gamer':       { x: 0.355, y: 0.655, zone: 'Living Gamer' },
-    'lab-retro':          { x: 0.615, y: 0.660, zone: 'Lab Retro' },
-    'taller-electronica': { x: 0.478, y: 0.495, zone: 'Atrio Central' },
-    'estudio-minimal':    { x: 0.410, y: 0.535, zone: 'Pasillo Oeste' }
+    'estudio-madera': {
+      x: 0.245, y: 0.455, zone: 'Estudio Madera',
+      patrol: [
+        { x: 0.245, y: 0.455, icon: '📊' },
+        { x: 0.282, y: 0.412, icon: '📚' },
+        { x: 0.220, y: 0.482, icon: '✍️' }
+      ]
+    },
+    'oficina-ruta': {
+      x: 0.520, y: 0.310, zone: 'Café y Ruta',
+      patrol: [
+        { x: 0.520, y: 0.310, icon: '☕' },
+        { x: 0.488, y: 0.315, icon: '🗺️' },
+        { x: 0.556, y: 0.338, icon: '🧾' }
+      ]
+    },
+    'garage-cozy': {
+      x: 0.695, y: 0.460, zone: 'Garage Cozy',
+      patrol: [
+        { x: 0.695, y: 0.460, icon: '🔧' },
+        { x: 0.742, y: 0.418, icon: '🛠️' },
+        { x: 0.735, y: 0.528, icon: '💻' }
+      ]
+    },
+    'living-gamer': {
+      x: 0.355, y: 0.655, zone: 'Living Gamer',
+      patrol: [
+        { x: 0.355, y: 0.655, icon: '🎧' },
+        { x: 0.392, y: 0.688, icon: '💬' },
+        { x: 0.326, y: 0.694, icon: '🐾' }
+      ]
+    },
+    'lab-retro': {
+      x: 0.615, y: 0.660, zone: 'Lab Retro',
+      patrol: [
+        { x: 0.615, y: 0.660, icon: '🧪' },
+        { x: 0.642, y: 0.618, icon: '✨' },
+        { x: 0.648, y: 0.700, icon: '🎮' }
+      ]
+    },
+    'taller-electronica': {
+      x: 0.478, y: 0.495, zone: 'Atrio Central',
+      patrol: [
+        { x: 0.478, y: 0.495, icon: '⚡' },
+        { x: 0.455, y: 0.515, icon: '🔋' }
+      ]
+    },
+    'estudio-minimal': {
+      x: 0.410, y: 0.535, zone: 'Pasillo Oeste',
+      patrol: [
+        { x: 0.410, y: 0.535, icon: '✨' },
+        { x: 0.440, y: 0.515, icon: '📋' }
+      ]
+    }
   },
   // Puestos adicionales para futuros agentes (6, 7, 8, 9...)
   extraSpots: [

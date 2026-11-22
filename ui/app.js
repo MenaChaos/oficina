@@ -3,17 +3,19 @@
  * Conecta OfficeStore, RoomAssetManager, OfficeRenderer y BridgeAPI.
  */
 
-import { OfficeStore } from '../core/store.js?v=3.5';
-import { OfficeRenderer } from '../core/renderer.js?v=3.5';
-import { RoomAssetManager, compressImageFileToDataUrl } from '../core/assets.js?v=3.5';
+import { OfficeStore } from '../core/store.js?v=3.6';
+import { OfficeRenderer } from '../core/renderer.js?v=3.6';
+import { RoomAssetManager, compressImageFileToDataUrl } from '../core/assets.js?v=3.6';
 import { THEMES } from '../themes/themes.js';
-import { ROOM_TEMPLATES, BUILDING_FLOORPLAN, getRoomTemplate } from '../config/rooms.js?v=3.5';
-import { AVATAR_TEMPLATES } from '../config/avatars.js?v=3.5';
-import { parseSteamHistoryLines } from '../core/api.js';
+import { ROOM_TEMPLATES, BUILDING_FLOORPLAN, getRoomTemplate } from '../config/rooms.js?v=3.6';
+import { AVATAR_TEMPLATES } from '../config/avatars.js?v=3.6';
+import { parseSteamHistoryLines } from '../core/api.js?v=3.6';
+import { OfficeChatterEngine } from '../core/chatter.js?v=3.6';
 
 const store = new OfficeStore();
 let assetManager = null;
 let renderer = null;
+let chatter = null;
 let refreshTimer = null;
 let activeDashCategory = 'all';
 
@@ -88,6 +90,9 @@ function init() {
   renderAvatarsGallery();
   if ($('#cfg-ipad-top')) $('#cfg-ipad-top').value = String(store.state.prefs.ipadTop ?? 'auto');
   if ($('#cfg-ipad-left')) $('#cfg-ipad-left').value = String(store.state.prefs.ipadLeft ?? 'auto');
+  if ($('#cfg-chatter-mode')) $('#cfg-chatter-mode').value = String(store.state.prefs.chatterMode || 'normal');
+  if ($('#cfg-avatar-motion')) $('#cfg-avatar-motion').value = String(store.state.prefs.avatarMotion !== false);
+  if ($('#cfg-use-openai')) $('#cfg-use-openai').checked = store.state.prefs.useOpenAI !== false;
     renderAvatarsGallery();
   });
 
@@ -95,6 +100,13 @@ function init() {
     store.state.selectedAgentId = agentId;
     renderQuickbar();
     openInspector(agentId);
+    if (chatter) chatter.speakClickHighlight(agentId);
+  });
+
+  chatter = new OfficeChatterEngine({
+    store,
+    renderer,
+    onStatusChange: (info) => updateChatterStatusUI(info)
   });
 
   populateRoomStyleSelect();
@@ -120,6 +132,8 @@ function init() {
       .connectAndBootstrap()
       .then(() => {
         scheduleAutoRefresh();
+        chatter.start();
+        chatter.refreshFromOpenAI(false);
         toast('Oficina Cozy sincronizada en vivo');
       })
       .catch((err) => {
@@ -163,6 +177,14 @@ function bindGlobalEvents() {
     store.setActiveOffice(e.target.value);
     closeInspector();
     renderer.resetCamera();
+  });
+
+  $('#btn-spark-chat').addEventListener('click', () => {
+    if (!chatter) return;
+    const office = store.getActiveOffice();
+    const active = (office?.agents || []).filter((a) => a.enabled !== false);
+    if (active.length >= 2) chatter.playConversation(active);
+    else if (active.length === 1) chatter.playSoloRemark(active);
   });
 
   $('#btn-layout-toggle').addEventListener('click', async () => {
@@ -270,6 +292,8 @@ function bindAuthModal() {
       await store.connectAndBootstrap($('#auth-url-input').value.trim(), $('#auth-secret-input').value.trim(), true);
       $('#auth-modal').classList.add('hidden');
       scheduleAutoRefresh();
+      chatter.start();
+      chatter.refreshFromOpenAI(false);
       toast('¡Conectado a tus automatizaciones reales!');
     } catch (err) {
       $('#auth-error').textContent = err.message || 'No se pudo autenticar.';
@@ -283,6 +307,7 @@ function bindAuthModal() {
   $('#auth-demo-btn').addEventListener('click', () => {
     store.enterDemoMode();
     $('#auth-modal').classList.add('hidden');
+    chatter.start();
     toast('Modo Demo offline activado');
   });
 }
@@ -339,6 +364,7 @@ function renderAll(triggerRemodel = false) {
     themeId: store.getActiveThemeId(),
     layoutMode,
     selectedAgentId: store.state.selectedAgentId,
+    motionEnabled: store.state.prefs.avatarMotion !== false,
     triggerRemodel
   });
 
@@ -374,6 +400,7 @@ function renderQuickbar() {
       store.state.selectedAgentId = btn.dataset.agent;
       renderQuickbar();
       openInspector(btn.dataset.agent);
+      if (chatter) chatter.speakClickHighlight(btn.dataset.agent);
       renderer.setScene({
         office,
         agents: office.agents,
@@ -1117,6 +1144,24 @@ function renderAvatarsGallery() {
   });
 }
 
+
+function updateChatterStatusUI(info) {
+  const el = $('#chatter-status');
+  if (!el || !info) return;
+  if (info.status === 'loading') {
+    el.className = 'feedback-msg';
+    el.textContent = '✨ Consultando a OpenAI para generar diálogos frescos...';
+  } else if (info.status === 'openai') {
+    el.className = 'feedback-msg ok';
+    el.textContent = '✓ Diálogos dinámicos con OpenAI (gpt-4o-mini) activos';
+  } else {
+    el.className = 'feedback-msg';
+    el.textContent = info.error
+      ? `Motor local activo (${info.error})`
+      : 'Motor local con datos en vivo activo (agrega OPENAI_API_KEY en Apps Script para modo IA)';
+  }
+}
+
 function renderDesignPanel() {
   const layoutMode = store.getLayoutMode();
   $('#btn-mode-cozy').classList.toggle('btn-active-mode', layoutMode === 'cozy-rooms');
@@ -1150,6 +1195,9 @@ function renderDesignPanel() {
   renderAvatarsGallery();
   if ($('#cfg-ipad-top')) $('#cfg-ipad-top').value = String(store.state.prefs.ipadTop ?? 'auto');
   if ($('#cfg-ipad-left')) $('#cfg-ipad-left').value = String(store.state.prefs.ipadLeft ?? 'auto');
+  if ($('#cfg-chatter-mode')) $('#cfg-chatter-mode').value = String(store.state.prefs.chatterMode || 'normal');
+  if ($('#cfg-avatar-motion')) $('#cfg-avatar-motion').value = String(store.state.prefs.avatarMotion !== false);
+  if ($('#cfg-use-openai')) $('#cfg-use-openai').checked = store.state.prefs.useOpenAI !== false;
 
   if (document.activeElement !== $('#cfg-bridge-url')) $('#cfg-bridge-url').value = store.state.bridgeUrl;
   if (document.activeElement !== $('#cfg-api-secret')) $('#cfg-api-secret').value = store.state.apiSecret;
@@ -1162,6 +1210,43 @@ function bindDesignView() {
     store.saveLocalPrefs();
     applyIPadSafeLayout();
     toast('Margen superior iPad actualizado');
+  });
+
+  $('#cfg-chatter-mode').addEventListener('change', (e) => {
+    store.state.prefs.chatterMode = e.target.value;
+    store.saveLocalPrefs();
+    if (chatter) chatter.start();
+    toast('Frecuencia de diálogos actualizada');
+  });
+
+  $('#cfg-avatar-motion').addEventListener('change', (e) => {
+    store.state.prefs.avatarMotion = e.target.value === 'true';
+    store.saveLocalPrefs();
+    renderAll();
+    toast(store.state.prefs.avatarMotion ? 'Avatares en movimiento activados' : 'Avatares en posición fija');
+  });
+
+  $('#cfg-use-openai').addEventListener('change', (e) => {
+    store.state.prefs.useOpenAI = e.target.checked;
+    store.saveLocalPrefs();
+    if (chatter) chatter.refreshFromOpenAI(e.target.checked);
+  });
+
+  $('#btn-refresh-chatter').addEventListener('click', async () => {
+    if (!chatter) return;
+    await chatter.refreshFromOpenAI(true);
+    toast(chatter.aiStatus === 'openai' ? '¡Nuevos diálogos IA generados!' : 'Usando diálogos dinámicos locales');
+  });
+
+  $('#btn-test-convo').addEventListener('click', () => {
+    if (!chatter) return;
+    const office = store.getActiveOffice();
+    const active = (office?.agents || []).filter((a) => a.enabled !== false);
+    document.querySelector('.nav-btn[data-view="office"]').click();
+    setTimeout(() => {
+      if (active.length >= 2) chatter.playConversation(active);
+      else if (active.length === 1) chatter.playSoloRemark(active);
+    }, 180);
   });
 
   $('#cfg-ipad-left').addEventListener('change', (e) => {

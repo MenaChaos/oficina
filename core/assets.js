@@ -6,8 +6,8 @@
  *   a sprites con transparencia nítida, despill de bordes y auto-encuadre en los pies.
  */
 
-import { ROOM_TEMPLATES, BUILDING_FLOORPLAN } from '../config/rooms.js?v=3.4';
-import { AVATAR_TEMPLATES } from '../config/avatars.js?v=3.4';
+import { ROOM_TEMPLATES, BUILDING_FLOORPLAN } from '../config/rooms.js?v=3.6';
+import { AVATAR_TEMPLATES } from '../config/avatars.js?v=3.6';
 
 const LS_KEY_CUSTOM_ROOMS = 'menachaos_os_custom_rooms_v3';
 const LS_KEY_CUSTOM_AVATARS = 'menachaos_os_custom_avatars_v3';
