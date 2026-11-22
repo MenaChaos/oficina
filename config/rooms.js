@@ -1,7 +1,33 @@
 /**
- * CAPA DE HABITACIONES COZY (config/rooms.js)
- * Define las plantillas de salas diorama independientes por agente.
+ * CAPA DE HABITACIONES Y PLANO DEL EDIFICIO COZY (config/rooms.js)
+ * Define tanto las plantillas de salas diorama individuales como las coordenadas
+ * de cada cubículo/estancia dentro del Edificio Cozy Completo (edificio-cozy.jpg).
  */
+
+export const BUILDING_FLOORPLAN = {
+  id: 'edificio-cozy',
+  name: 'Edificio Completo (Oficina Abierta)',
+  fileBase: 'edificio-cozy',
+  aspectRatio: 16 / 9,
+  // Coordenadas normalizadas (0..1) de cada estancia dentro de edificio-cozy.jpg
+  roomSpots: {
+    'estudio-madera':     { x: 0.305, y: 0.435, zone: 'Estudio Madera' },
+    'oficina-ruta':       { x: 0.465, y: 0.305, zone: 'Café y Ruta' },
+    'garage-cozy':        { x: 0.625, y: 0.475, zone: 'Garage Cozy' },
+    'living-gamer':       { x: 0.335, y: 0.645, zone: 'Living Gamer' },
+    'lab-retro':          { x: 0.565, y: 0.665, zone: 'Lab Retro' },
+    'taller-electronica': { x: 0.478, y: 0.495, zone: 'Atrio Central' },
+    'estudio-minimal':    { x: 0.395, y: 0.530, zone: 'Pasillo Oeste' }
+  },
+  // Puestos adicionales para futuros agentes (6, 7, 8, 9...) sin solaparse
+  extraSpots: [
+    { x: 0.478, y: 0.495, zone: 'Atrio Central' },
+    { x: 0.395, y: 0.530, zone: 'Pasillo Oeste' },
+    { x: 0.455, y: 0.745, zone: 'Hall Sur' },
+    { x: 0.695, y: 0.365, zone: 'Banco Taller' },
+    { x: 0.255, y: 0.545, zone: 'Rincón Lectura' }
+  ]
+};
 
 export const ROOM_TEMPLATES = {
   'garage-cozy': {

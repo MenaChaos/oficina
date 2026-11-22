@@ -1,82 +1,84 @@
 /**
  * CAPA DE ASSETS VISUALES (core/assets.js)
- * Carga automáticamente las ilustraciones de salas desde ./assets/rooms/<id>.(jpg|png|webp),
- * además de permitir sobrescribir cualquier sala con una imagen cargada localmente o una URL.
+ * Carga automáticamente las ilustraciones de salas y del Edificio Completo
+ * desde ./assets/rooms/<id>.(jpg|png|webp), además de permitir pruebas locales.
  */
 
-import { ROOM_TEMPLATES } from '../config/rooms.js';
+import { ROOM_TEMPLATES, BUILDING_FLOORPLAN } from '../config/rooms.js';
 
 const LS_KEY_CUSTOM_ROOMS = 'menachaos_os_custom_rooms_v3';
 
 export class RoomAssetManager {
   constructor(onAssetLoaded) {
     this.onAssetLoaded = onAssetLoaded;
-    this.cache = new Map(); // key -> { status: 'loading'|'loaded'|'missing', img, src }
+    this.cache = new Map();
     this.customOverrides = this.loadLocalOverrides();
     this.preloadBuiltInTemplates();
   }
 
   loadLocalOverrides() {
-    try {
-      return JSON.parse(localStorage.getItem(LS_KEY_CUSTOM_ROOMS) || '{}');
-    } catch {
-      return {};
-    }
+    try { return JSON.parse(localStorage.getItem(LS_KEY_CUSTOM_ROOMS) || '{}'); } catch { return {}; }
   }
 
   saveLocalOverrides() {
     try {
       localStorage.setItem(LS_KEY_CUSTOM_ROOMS, JSON.stringify(this.customOverrides));
     } catch (e) {
-      console.warn('No se pudo guardar override local (cuota excedida):', e);
+      console.warn('No se pudo guardar override local:', e);
     }
   }
 
   preloadBuiltInTemplates() {
+    this.resolveAssetById(BUILDING_FLOORPLAN.id, BUILDING_FLOORPLAN.fileBase);
     Object.values(ROOM_TEMPLATES).forEach((tpl) => {
-      this.resolveTemplateImage(tpl.id);
+      this.resolveAssetById(tpl.id, tpl.fileBase);
     });
   }
 
-  setCustomRoomImage(roomId, dataUrl) {
-    if (!dataUrl) {
-      delete this.customOverrides[roomId];
-    } else {
-      this.customOverrides[roomId] = dataUrl;
-    }
+  setCustomRoomImage(assetId, dataUrl) {
+    if (!dataUrl) delete this.customOverrides[assetId];
+    else this.customOverrides[assetId] = dataUrl;
     this.saveLocalOverrides();
-    this.cache.delete('tpl:' + roomId);
-    this.resolveTemplateImage(roomId);
+    this.cache.delete('tpl:' + assetId);
+    const fileBase = assetId === BUILDING_FLOORPLAN.id
+      ? BUILDING_FLOORPLAN.fileBase
+      : (ROOM_TEMPLATES[assetId]?.fileBase || assetId);
+    this.resolveAssetById(assetId, fileBase);
   }
 
-  getTemplateStatus(roomId) {
-    const entry = this.cache.get('tpl:' + roomId);
+  getTemplateStatus(assetId) {
+    const entry = this.cache.get('tpl:' + assetId);
     return entry ? entry.status : 'missing';
   }
 
-  getTemplateSrc(roomId) {
-    const entry = this.cache.get('tpl:' + roomId);
+  getTemplateSrc(assetId) {
+    const entry = this.cache.get('tpl:' + assetId);
     return entry && entry.status === 'loaded' ? entry.src : null;
   }
 
-  resolveTemplateImage(roomId) {
-    const key = 'tpl:' + roomId;
+  resolveAssetById(assetId, fileBase) {
+    const key = 'tpl:' + assetId;
     if (this.cache.has(key)) return this.cache.get(key);
 
-    // 1. Si el usuario subió un override local en el navegador
-    if (this.customOverrides[roomId]) {
-      return this.loadImageKey(key, [this.customOverrides[roomId]]);
+    if (this.customOverrides[assetId]) {
+      return this.loadImageKey(key, [this.customOverrides[assetId]]);
     }
 
-    // 2. Intentar cargar desde assets/rooms/<fileBase>.(jpg|png|webp)
-    const tpl = ROOM_TEMPLATES[roomId];
-    if (!tpl) return { status: 'missing', img: null, src: null };
     const candidates = [
-      `./assets/rooms/${tpl.fileBase}.jpg`,
-      `./assets/rooms/${tpl.fileBase}.png`,
-      `./assets/rooms/${tpl.fileBase}.webp`
+      `./assets/rooms/${fileBase}.jpg`,
+      `./assets/rooms/${fileBase}.png`,
+      `./assets/rooms/${fileBase}.webp`
     ];
     return this.loadImageKey(key, candidates);
+  }
+
+  getBuildingImage(office = null) {
+    if (office && office.floorplanImageUrl) {
+      const custom = this.resolveCustomUrl(office.floorplanImageUrl);
+      if (custom && custom.status === 'loaded') return custom.img;
+    }
+    const entry = this.resolveAssetById(BUILDING_FLOORPLAN.id, BUILDING_FLOORPLAN.fileBase);
+    return entry && entry.status === 'loaded' ? entry.img : null;
   }
 
   resolveCustomUrl(url) {
@@ -91,7 +93,9 @@ export class RoomAssetManager {
       const custom = this.resolveCustomUrl(agent.roomImageUrl);
       if (custom && custom.status === 'loaded') return custom.img;
     }
-    const entry = this.resolveTemplateImage(roomStyleId);
+    const tpl = ROOM_TEMPLATES[roomStyleId];
+    if (!tpl) return null;
+    const entry = this.resolveAssetById(tpl.id, tpl.fileBase);
     return entry && entry.status === 'loaded' ? entry.img : null;
   }
 
@@ -122,11 +126,7 @@ export class RoomAssetManager {
   }
 }
 
-/**
- * Comprime una imagen subida por el usuario a JPEG ligero (~90KB)
- * para poder guardarla al instante en localStorage como vista previa.
- */
-export function compressImageFileToDataUrl(file, maxSize = 680, quality = 0.84) {
+export function compressImageFileToDataUrl(file, maxSize = 1100, quality = 0.85) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error('No se pudo leer el archivo.'));

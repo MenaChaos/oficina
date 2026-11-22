@@ -1,13 +1,14 @@
 /**
- * MOTOR VISUAL HÍBRIDO COZY 2.5D v3.1 (core/renderer.js)
- * Dos vistas con toda la estética Cozy ilustrada:
- * 1) 'cozy-rooms': Tarjetas diorama ordenadas con datos en vivo, sin choques ni recortes.
- * 2) 'open-floor' (Campus Cozy / Oficina Completa): Los dioramas ilustrados fundidos
- *    sin recuadros en un complejo isométrico conectado por senderos luminosos a un Hub central.
+ * MOTOR VISUAL HÍBRIDO COZY 2.5D v3.2 (core/renderer.js)
+ * Dos vistas 100% Cozy intercambiables:
+ * 1) 'open-floor' -> EDIFICIO COZY COMPLETO: Una única planta arquitectónica isométrica
+ *    con pasillos, tabiques de madera/vidrio, cubículos y garage integrados (edificio-cozy.jpg),
+ *    con todos tus agentes animados y placas en vivo dentro de cada estancia.
+ * 2) 'cozy-rooms' -> SALAS SEPARADAS: Cada agente en su propia tarjeta diorama independiente.
  */
 
 import { getTheme } from '../themes/themes.js';
-import { getRoomTemplate } from '../config/rooms.js';
+import { getRoomTemplate, BUILDING_FLOORPLAN } from '../config/rooms.js';
 
 const STATUS_COLORS = {
   VERDE: '#22c55e',
@@ -23,24 +24,24 @@ export class OfficeRenderer {
     this.assets = assetManager;
     this.onSelectAgent = onSelectAgent;
 
+    this.office = null;
     this.agents = [];
     this.agentData = {};
     this.themeId = 'cozy-warm';
-    this.layoutMode = 'cozy-rooms';
+    this.layoutMode = 'open-floor';
     this.selectedAgentId = null;
 
     this.cam = { x: 0, y: 0, zoom: 1 };
     this.hitBoxes = [];
     this.bubbles = new Map();
-    this.featheredCache = new WeakMap(); // img -> offscreen canvas con bordes suaves
     this.remodelProgress = 1;
 
-    // Partículas cálidas flotantes (ambiente cozy)
-    this.motes = Array.from({ length: 30 }, () => ({
+    // Partículas ambientales cálidas
+    this.motes = Array.from({ length: 28 }, () => ({
       x: Math.random(),
       y: Math.random(),
-      r: 1.2 + Math.random() * 2.1,
-      s: 0.25 + Math.random() * 0.55,
+      r: 1.2 + Math.random() * 2.0,
+      s: 0.25 + Math.random() * 0.5,
       p: Math.random() * Math.PI * 2
     }));
 
@@ -59,7 +60,8 @@ export class OfficeRenderer {
     this.startLoop();
   }
 
-  setScene({ agents, agentData, themeId, layoutMode, selectedAgentId, triggerRemodel = false }) {
+  setScene({ office, agents, agentData, themeId, layoutMode, selectedAgentId, triggerRemodel = false }) {
+    if (office !== undefined) this.office = office;
     this.agents = agents || [];
     this.agentData = agentData || {};
     if (themeId && themeId !== this.themeId) {
@@ -87,7 +89,7 @@ export class OfficeRenderer {
   }
 
   zoomBy(factor) {
-    this.cam.zoom = Math.max(0.55, Math.min(2.2, this.cam.zoom * factor));
+    this.cam.zoom = Math.max(0.6, Math.min(2.4, this.cam.zoom * factor));
   }
 
   resize() {
@@ -126,7 +128,7 @@ export class OfficeRenderer {
       if (this.pointers.size === 2 && this.pinchStartDist) {
         const pts = Array.from(this.pointers.values());
         const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
-        this.cam.zoom = Math.max(0.55, Math.min(2.2, this.pinchStartZoom * (dist / this.pinchStartDist)));
+        this.cam.zoom = Math.max(0.6, Math.min(2.4, this.pinchStartZoom * (dist / this.pinchStartDist)));
         this.dragMoved = true;
         return;
       }
@@ -176,35 +178,6 @@ export class OfficeRenderer {
     }
   }
 
-  /**
-   * Crea una versión con máscara suave (bordes transparentes) de cada diorama ilustrado
-   * para que en el modo Campus Completo floten sin bordes cuadrados.
-   */
-  getFeatheredRoomCanvas(img) {
-    if (!img) return null;
-    if (this.featheredCache.has(img)) return this.featheredCache.get(img);
-
-    const size = Math.min(512, Math.max(img.naturalWidth || 512, 256));
-    const c = document.createElement('canvas');
-    c.width = size;
-    c.height = size;
-    const g = c.getContext('2d');
-    g.drawImage(img, 0, 0, size, size);
-
-    // Máscara radial suave que conserva 100% del diorama central y funde los bordes carbón
-    g.globalCompositeOperation = 'destination-in';
-    const mask = g.createRadialGradient(size * 0.5, size * 0.51, size * 0.30, size * 0.5, size * 0.51, size * 0.49);
-    mask.addColorStop(0, 'rgba(0,0,0,1)');
-    mask.addColorStop(0.76, 'rgba(0,0,0,0.98)');
-    mask.addColorStop(0.92, 'rgba(0,0,0,0.45)');
-    mask.addColorStop(1, 'rgba(0,0,0,0)');
-    g.fillStyle = mask;
-    g.fillRect(0, 0, size, size);
-
-    this.featheredCache.set(img, c);
-    return c;
-  }
-
   startLoop() {
     const loop = () => {
       this.t += 0.03;
@@ -243,7 +216,7 @@ export class OfficeRenderer {
     ctx.restore();
 
     if (this.layoutMode === 'open-floor') {
-      this.drawCozyCampusMode(ctx, theme, W, H);
+      this.drawUnifiedBuildingMode(ctx, theme, W, H);
     } else {
       this.drawCozyRoomsMode(ctx, theme, W, H);
     }
@@ -262,7 +235,261 @@ export class OfficeRenderer {
   }
 
   // ==========================================================================
-  // MODO 1: TARJETAS DE SALAS COZY SEPARADAS
+  // MODO 1: EDIFICIO COZY COMPLETO (UNA SOLA PLANTA ARQUITECTÓNICA CON PASILLOS)
+  // ==========================================================================
+  drawUnifiedBuildingMode(ctx, theme, W, H) {
+    this.hitBoxes = [];
+    const buildingImg = this.assets ? this.assets.getBuildingImage(this.office) : null;
+
+    // Calcular caja de dibujo generosa respetando HUD y quickbar
+    const padTop = 50;
+    const padBottom = 68;
+    const availW = Math.max(320, W - 24);
+    const availH = Math.max(240, H - padTop - padBottom);
+
+    const ratio = buildingImg && buildingImg.naturalWidth
+      ? buildingImg.naturalWidth / buildingImg.naturalHeight
+      : BUILDING_FLOORPLAN.aspectRatio;
+
+    let drawW = availW;
+    let drawH = drawW / ratio;
+    if (drawH > availH) {
+      drawH = availH;
+      drawW = drawH * ratio;
+    }
+
+    // Aprovechar un poquito más el ancho en pantallas 4:3 / iPad (recortando solo margen carbón sobrante)
+    const fillBoost = 1.08;
+    drawW *= fillBoost;
+    drawH *= fillBoost;
+
+    const left = (W - drawW) / 2;
+    const top = padTop + (availH - drawH) / 2 - 4;
+
+    ctx.save();
+    ctx.translate(W / 2 + this.cam.x, H / 2 + this.cam.y);
+    ctx.scale(this.cam.zoom, this.cam.zoom);
+    ctx.translate(-W / 2, -H / 2);
+
+    if (buildingImg) {
+      ctx.drawImage(buildingImg, left, top, drawW, drawH);
+
+      // Fusión suave en los bordes externos para que el fondo carbón se integre sin costuras
+      const edgeGlow = ctx.createRadialGradient(
+        left + drawW * 0.5,
+        top + drawH * 0.52,
+        Math.min(drawW, drawH) * 0.34,
+        left + drawW * 0.5,
+        top + drawH * 0.52,
+        Math.max(drawW, drawH) * 0.54
+      );
+      edgeGlow.addColorStop(0, 'rgba(30, 32, 36, 0)');
+      edgeGlow.addColorStop(0.82, 'rgba(30, 32, 36, 0)');
+      edgeGlow.addColorStop(1, theme.bgBottom || '#1c1d20');
+      ctx.fillStyle = edgeGlow;
+      ctx.fillRect(left - 2, top - 2, drawW + 4, drawH + 4);
+
+      // Respiración sutil de luz cálida en el edificio
+      const pulse = 0.65 + Math.sin(this.t * 1.5) * 0.35;
+      const warmAmbient = ctx.createRadialGradient(
+        left + drawW * 0.5,
+        top + drawH * 0.5,
+        drawW * 0.05,
+        left + drawW * 0.5,
+        top + drawH * 0.5,
+        drawW * 0.42
+      );
+      warmAmbient.addColorStop(0, 'rgba(255, 206, 130, 0.09)');
+      warmAmbient.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.globalAlpha = pulse;
+      ctx.fillStyle = warmAmbient;
+      ctx.fillRect(left, top, drawW, drawH);
+      ctx.globalAlpha = 1;
+    } else {
+      // Fallback arquitectónico con pasillos y cubículos si aún no suben edificio-cozy.jpg
+      this.drawFallbackBuildingPlan(ctx, left, top, drawW, drawH, theme);
+    }
+
+    // Asignar cada agente a su cubículo/estancia sin solapar jamás
+    const usedSpotKeys = new Set();
+    let extraIdx = 0;
+    const placements = this.agents.map((agent) => {
+      const tpl = getRoomTemplate(agent.roomStyle, agent);
+      let spot = null;
+
+      if (agent.buildingSpot && typeof agent.buildingSpot.x === 'number') {
+        spot = agent.buildingSpot;
+      } else if (BUILDING_FLOORPLAN.roomSpots[tpl.id] && !usedSpotKeys.has(tpl.id)) {
+        usedSpotKeys.add(tpl.id);
+        spot = BUILDING_FLOORPLAN.roomSpots[tpl.id];
+      } else {
+        // Buscar primer roomSpot libre o usar extraSpots
+        const freeKey = Object.keys(BUILDING_FLOORPLAN.roomSpots).find((k) => !usedSpotKeys.has(k));
+        if (freeKey) {
+          usedSpotKeys.add(freeKey);
+          spot = BUILDING_FLOORPLAN.roomSpots[freeKey];
+        } else {
+          spot = BUILDING_FLOORPLAN.extraSpots[extraIdx % BUILDING_FLOORPLAN.extraSpots.length];
+          extraIdx++;
+        }
+      }
+
+      return { agent, tpl, spot };
+    });
+
+    // Ordenar por profundidad vertical (de atrás hacia adelante)
+    placements.sort((a, b) => a.spot.y - b.spot.y);
+
+    const charScale = Math.max(0.72, Math.min(1.12, drawW / 1080));
+
+    placements.forEach(({ agent, tpl, spot }) => {
+      const live = this.agentData[agent.id] || {};
+      const status = agent.enabled === false ? 'PAUSADO' : live.status || 'VERDE';
+      const activity = agent.enabled === false ? 'idle' : live.activity || 'idle';
+      const isSelected = this.selectedAgentId === agent.id;
+      const statusColor = STATUS_COLORS[status] || STATUS_COLORS.VERDE;
+      const accentColor = agent.roomAccent || tpl.accent;
+
+      const bob = activity === 'working' ? Math.abs(Math.sin(this.t * 6.5)) * 4.5 : Math.sin(this.t * 2.2 + spot.x * 12) * 1.8;
+      const ax = left + drawW * spot.x;
+      const ay = top + drawH * spot.y;
+
+      // Halo sutil de selección o alerta en el piso de la estancia
+      if (isSelected || status === 'ROJO' || activity === 'working') {
+        const ringPulse = 0.65 + Math.sin(this.t * 4.5) * 0.35;
+        ctx.save();
+        ctx.strokeStyle = isSelected ? accentColor : statusColor;
+        ctx.fillStyle = isSelected ? accentColor : statusColor;
+        ctx.globalAlpha = 0.16 * ringPulse;
+        ctx.beginPath();
+        ctx.ellipse(ax, ay + 10 * charScale, 38 * charScale, 20 * charScale, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 0.82;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Personaje vivo dentro de su cubículo/estancia
+      this.drawCozyCharacter(ctx, ax, ay - bob, charScale, agent.avatar, status, activity);
+
+      // Placa compacta con nombre + semáforo + dato vivo justo debajo del personaje
+      const shortInfo = this.getShortHeadline(agent, live);
+      const plateY = ay + 34 * charScale;
+      ctx.font = '800 11.2px -apple-system, BlinkMacSystemFont, sans-serif';
+      const titleW = ctx.measureText(agent.name).width;
+      ctx.font = '500 9.6px -apple-system, BlinkMacSystemFont, sans-serif';
+      const subText = this.truncateText(ctx, shortInfo, 152);
+      const subW = ctx.measureText(subText).width;
+      const plateW = Math.min(182, Math.max(titleW + 32, subW + 22, 114));
+      const plateH = 34;
+
+      ctx.save();
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.55)';
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = 'rgba(20, 21, 25, 0.90)';
+      ctx.beginPath();
+      ctx.roundRect(ax - plateW / 2, plateY - plateH / 2, plateW, plateH, 10);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      ctx.strokeStyle = isSelected ? accentColor : status === 'ROJO' ? statusColor : 'rgba(244, 162, 97, 0.34)';
+      ctx.lineWidth = isSelected || status === 'ROJO' ? 1.8 : 1;
+      ctx.stroke();
+
+      // Punto de semáforo
+      ctx.fillStyle = statusColor;
+      ctx.beginPath();
+      ctx.arc(ax - plateW / 2 + 12, plateY - 6, status === 'ROJO' ? 4.1 + Math.sin(this.t * 6) * 0.9 : 3.6, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Nombre
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.font = '800 11.2px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.fillStyle = '#fbf6ee';
+      ctx.fillText(this.truncateText(ctx, agent.name, plateW - 26), ax - plateW / 2 + 21, plateY - 6);
+
+      // Dato vivo
+      ctx.font = '500 9.6px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.fillStyle = status === 'ROJO' ? '#fca5a5' : status === 'AMARILLO' ? '#fcd34d' : '#c5bbb0';
+      ctx.fillText(subText, ax - plateW / 2 + 11, plateY + 8);
+      ctx.restore();
+
+      // Burbuja de diálogo temporal
+      const bubble = this.bubbles.get(agent.id);
+      if (bubble && bubble.until > performance.now()) {
+        ctx.font = '700 10.5px -apple-system, sans-serif';
+        const bText = this.truncateText(ctx, bubble.text, 175);
+        const bw = ctx.measureText(bText).width + 18;
+        const by = ay - 46 * charScale;
+        ctx.fillStyle = '#fffdf8';
+        ctx.beginPath();
+        ctx.roundRect(ax - bw / 2, by, bw, 22, 9);
+        ctx.fill();
+        ctx.fillStyle = '#1f1a17';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(bText, ax, by + 11);
+      }
+
+      // Hitbox generosa que cubre todo el cubículo + placa
+      const hitW = Math.max(plateW, 130 * charScale);
+      const hitH = 128 * charScale;
+      const hx = ax - hitW / 2;
+      const hy = ay - 56 * charScale;
+      const sx = (hx - W / 2) * this.cam.zoom + W / 2 + this.cam.x;
+      const sy = (hy - H / 2) * this.cam.zoom + H / 2 + this.cam.y;
+      this.hitBoxes.push({
+        agentId: agent.id,
+        x: sx,
+        y: sy,
+        w: hitW * this.cam.zoom,
+        h: hitH * this.cam.zoom
+      });
+    });
+
+    ctx.restore();
+  }
+
+  drawFallbackBuildingPlan(ctx, left, top, w, h, theme) {
+    // Plano arquitectónico de respaldo mientras suben assets/rooms/edificio-cozy.jpg
+    const cx = left + w / 2;
+    const cy = top + h / 2;
+    const rx = w * 0.42;
+    const ry = h * 0.36;
+
+    this.drawPoly(
+      ctx,
+      [
+        { x: cx, y: cy - ry },
+        { x: cx + rx, y: cy },
+        { x: cx, y: cy + ry },
+        { x: cx - rx, y: cy }
+      ],
+      theme.floorA || '#3b332d',
+      theme.wallTrim || '#f4a261',
+      2
+    );
+
+    // Pasillos internos en cruz
+    ctx.strokeStyle = 'rgba(244, 162, 97, 0.35)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx - rx * 0.5, cy - ry * 0.5);
+    ctx.lineTo(cx + rx * 0.5, cy + ry * 0.5);
+    ctx.moveTo(cx + rx * 0.5, cy - ry * 0.5);
+    ctx.lineTo(cx - rx * 0.5, cy + ry * 0.5);
+    ctx.stroke();
+
+    ctx.font = '600 12px -apple-system, sans-serif';
+    ctx.fillStyle = 'rgba(255, 240, 220, 0.65)';
+    ctx.textAlign = 'center';
+    ctx.fillText('Sube assets/rooms/edificio-cozy.jpg para activar el plano Cozy ilustrado', cx, top + h - 22);
+  }
+
+  // ==========================================================================
+  // MODO 2: TARJETAS DE SALAS COZY SEPARADAS
   // ==========================================================================
   drawCozyRoomsMode(ctx, theme, W, H) {
     this.hitBoxes = [];
@@ -275,7 +502,6 @@ export class OfficeRenderer {
     if (W < 640) cols = 1;
     const rows = Math.ceil(count / cols);
 
-    // Espacio útil calibrado para que el HUD superior y la barra inferior nunca tapen las tarjetas
     const padTop = 74;
     const padBottom = 94;
     const padSide = 28;
@@ -387,7 +613,6 @@ export class OfficeRenderer {
     const charScale = Math.max(0.78, Math.min(1.18, w / 290));
     this.drawCozyCharacter(ctx, cx, cy, charScale, agent.avatar, status, activity);
 
-    // Semáforo superior derecho primero para medir su ancho exacto y evitar colisiones
     const pillText = status;
     ctx.font = '800 9.5px -apple-system, BlinkMacSystemFont, sans-serif';
     const pillW = ctx.measureText(pillText).width + 24;
@@ -409,7 +634,6 @@ export class OfficeRenderer {
     ctx.textBaseline = 'middle';
     ctx.fillText(pillText, pillX + 18, y + 21.5);
 
-    // Etiqueta superior izquierda (acortada dinámicamente para jamás chocar con el semáforo)
     ctx.font = '700 10px -apple-system, BlinkMacSystemFont, sans-serif';
     const maxTagW = Math.max(64, pillX - (x + 10) - 8);
     const rawTag = `${tpl.icon} ${tpl.shortName || tpl.name}`;
@@ -425,7 +649,6 @@ export class OfficeRenderer {
     ctx.fillStyle = '#f5efe6';
     ctx.fillText(roomTag, x + 18, y + 21.5);
 
-    // Pie de la tarjeta
     ctx.textAlign = 'left';
     ctx.font = '800 14px -apple-system, BlinkMacSystemFont, sans-serif';
     ctx.fillStyle = '#fbf6ee';
@@ -461,346 +684,19 @@ export class OfficeRenderer {
     ctx.stroke();
   }
 
-  // ==========================================================================
-  // MODO 2: CAMPUS COZY (OFICINA COMPLETA INTERCONECTADA)
-  // Funde los dioramas ilustrados sin marcos en un complejo isométrico único
-  // con senderos luminosos y un núcleo central vivo.
-  // ==========================================================================
-  drawCozyCampusMode(ctx, theme, W, H) {
-    this.hitBoxes = [];
-    const agents = this.agents;
-    const count = agents.length;
-    if (count === 0) return;
-
-    const padTop = 74;
-    const padBottom = 86;
-    const availW = Math.max(300, W - 40);
-    const availH = Math.max(240, H - padTop - padBottom);
-    const centerX = W / 2;
-    const centerY = padTop + availH / 2;
-
-    // Tamaño base de cada ala/diorama en el campus
-    const unit =
-      count <= 3
-        ? Math.min(availW / (count * 1.15), availH * 0.72, 320)
-        : count <= 5
-        ? Math.min(availW / 3.05, availH / 2.02, 295)
-        : Math.min(availW / 3.6, availH / 2.55, 250);
-
-    // Calcular coordenadas escalonadas en formato complejo isométrico
-    const positions = [];
-    if (count === 5) {
-      // Formación icónica 3 arriba (en arco isométrico) + 2 abajo abrazando el Hub central
-      const offsets = [
-        { dx: -1.04, dy: -0.32 },
-        { dx: 0.0, dy: -0.56 },
-        { dx: 1.04, dy: -0.32 },
-        { dx: -0.56, dy: 0.49 },
-        { dx: 0.56, dy: 0.49 }
-      ];
-      offsets.forEach((o) => positions.push({ x: centerX + o.dx * unit, y: centerY + o.dy * unit }));
-    } else {
-      const cols = count <= 2 ? count : count <= 4 ? 2 : 3;
-      const rows = Math.ceil(count / cols);
-      for (let i = 0; i < count; i++) {
-        const r = Math.floor(i / cols);
-        const c = i % cols;
-        const inRow = r === rows - 1 ? count - r * cols : cols;
-        const dx = (c - (inRow - 1) / 2) * 1.06;
-        const dy = (r - (rows - 1) / 2) * 0.92 + (c % 2 === 1 ? -0.08 : 0.06);
-        positions.push({ x: centerX + dx * unit, y: centerY + dy * unit });
-      }
-    }
-
-    const hubPos = { x: centerX, y: centerY + (count === 5 ? 0.07 * unit : 0) };
-
-    ctx.save();
-    ctx.translate(W / 2 + this.cam.x, H / 2 + this.cam.y);
-    ctx.scale(this.cam.zoom, this.cam.zoom);
-    ctx.translate(-W / 2, -H / 2);
-
-    // 1. Grilla isométrica sutil de campus bajo todo el complejo
-    this.drawCampusBackdropGrid(ctx, centerX, centerY, Math.max(availW, availH) * 0.56, theme);
-
-    // 2. Senderos de energía / pasillos cálidos conectando cada habitación al Hub central
-    agents.forEach((agent, idx) => {
-      const pos = positions[idx];
-      const live = this.agentData[agent.id] || {};
-      const status = agent.enabled === false ? 'PAUSADO' : live.status || 'VERDE';
-      const statusColor = STATUS_COLORS[status] || STATUS_COLORS.VERDE;
-      const activity = live.activity || 'idle';
-
-      // Línea de pasillo con ángulo isométrico suave (curva cuadrática hacia el hub)
-      const midX = (hubPos.x + pos.x) / 2;
-      const midY = (hubPos.y + pos.y) / 2 + (pos.y < hubPos.y ? 14 : -10);
-
-      ctx.save();
-      ctx.strokeStyle = status === 'ROJO' ? 'rgba(239, 68, 68, 0.45)' : 'rgba(244, 162, 97, 0.25)';
-      ctx.lineWidth = 3;
-      ctx.setLineDash([6, 6]);
-      ctx.beginPath();
-      ctx.moveTo(hubPos.x, hubPos.y);
-      ctx.quadraticCurveTo(midX, midY, pos.x, pos.y + unit * 0.14);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // Pulso luminoso viajando por el sendero hacia el Hub
-      const speed = activity === 'working' || status === 'ROJO' ? 0.85 : 0.42;
-      const p = (this.t * speed + idx * 0.21) % 1;
-      const inv = 1 - p;
-      const px = inv * inv * hubPos.x + 2 * inv * p * midX + p * p * pos.x;
-      const py = inv * inv * hubPos.y + 2 * inv * p * midY + p * p * (pos.y + unit * 0.14);
-
-      ctx.shadowColor = statusColor;
-      ctx.shadowBlur = 12;
-      ctx.fillStyle = statusColor;
-      ctx.beginPath();
-      ctx.arc(px, py, 3.6, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    });
-
-    // 3. Núcleo Central del Campus (MenaChaos Bridge Hub)
-    this.drawCampusCentralHub(ctx, hubPos.x, hubPos.y, unit * 0.16, theme);
-
-    // 4. Dibujar cada diorama Cozy flotante en orden de profundidad (de arriba hacia abajo)
-    const order = agents.map((agent, idx) => ({ agent, pos: positions[idx] })).sort((a, b) => a.pos.y - b.pos.y);
-
-    order.forEach(({ agent, pos }) => {
-      this.drawCampusWing(ctx, pos.x, pos.y, unit, agent, theme);
-
-      const halfW = unit * 0.44;
-      const halfH = unit * 0.42;
-      const sx = (pos.x - halfW - W / 2) * this.cam.zoom + W / 2 + this.cam.x;
-      const sy = (pos.y - halfH - H / 2) * this.cam.zoom + H / 2 + this.cam.y;
-      this.hitBoxes.push({
-        agentId: agent.id,
-        x: sx,
-        y: sy,
-        w: halfW * 2 * this.cam.zoom,
-        h: halfH * 2 * this.cam.zoom
-      });
-    });
-
-    ctx.restore();
-  }
-
-  drawCampusBackdropGrid(ctx, cx, cy, radius, theme) {
-    ctx.save();
-    ctx.strokeStyle = theme.floorGrid || 'rgba(244, 162, 97, 0.08)';
-    ctx.lineWidth = 1;
-    const step = 46;
-    for (let i = -7; i <= 7; i++) {
-      ctx.beginPath();
-      ctx.moveTo(cx - radius, cy + i * step * 0.5 - radius * 0.5);
-      ctx.lineTo(cx + radius, cy + i * step * 0.5 + radius * 0.5);
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.moveTo(cx - radius, cy + i * step * 0.5 + radius * 0.5);
-      ctx.lineTo(cx + radius, cy + i * step * 0.5 - radius * 0.5);
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  drawCampusCentralHub(ctx, cx, cy, r, theme) {
-    const pulse = 0.7 + Math.sin(this.t * 2.5) * 0.3;
-    ctx.save();
-
-    // Halo cálido central
-    const glow = ctx.createRadialGradient(cx, cy, 4, cx, cy, r * 2.2);
-    glow.addColorStop(0, 'rgba(244, 162, 97, 0.34)');
-    glow.addColorStop(1, 'rgba(244, 162, 97, 0)');
-    ctx.fillStyle = glow;
-    ctx.beginPath();
-    ctx.arc(cx, cy, r * 2.2, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Plataforma isométrica del núcleo
-    this.drawPoly(
-      ctx,
-      [
-        { x: cx, y: cy - r * 0.65 },
-        { x: cx + r * 1.15, y: cy },
-        { x: cx, y: cy + r * 0.65 },
-        { x: cx - r * 1.15, y: cy }
-      ],
-      'rgba(39, 41, 46, 0.92)',
-      theme.wallTrim || '#f4a261',
-      1.6
-    );
-
-    // Mini torre central / farol de enlace
-    ctx.fillStyle = theme.wallTrim || '#f4a261';
-    ctx.globalAlpha = pulse;
-    ctx.beginPath();
-    ctx.arc(cx, cy - 2, 5.5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = 1;
-
-    ctx.font = '800 9.5px -apple-system, sans-serif';
-    ctx.fillStyle = '#fbf6ee';
-    ctx.textAlign = 'center';
-    ctx.fillText('HUB', cx, cy + r * 0.45);
-    ctx.restore();
-  }
-
-  drawCampusWing(ctx, cx, cy, unit, agent, theme) {
-    const live = this.agentData[agent.id] || {};
-    const status = agent.enabled === false ? 'PAUSADO' : live.status || 'VERDE';
-    const activity = agent.enabled === false ? 'idle' : live.activity || 'idle';
-    const isSelected = this.selectedAgentId === agent.id;
-    const statusColor = STATUS_COLORS[status] || STATUS_COLORS.VERDE;
-    const tpl = getRoomTemplate(agent.roomStyle, agent);
-    const accentColor = agent.roomAccent || tpl.accent;
-
-    const imgSize = unit * 1.06;
-    const left = cx - imgSize / 2;
-    const top = cy - imgSize / 2;
-
-    // Halo de luz cálida o alerta proyectado bajo la sala flotante
-    ctx.save();
-    const underGlow = ctx.createRadialGradient(cx, cy + unit * 0.16, 8, cx, cy + unit * 0.14, unit * 0.56);
-    if (isSelected) {
-      underGlow.addColorStop(0, accentColor);
-    } else if (status === 'ROJO') {
-      underGlow.addColorStop(0, 'rgba(239, 68, 68, 0.45)');
-    } else {
-      underGlow.addColorStop(0, tpl.lampGlow || 'rgba(244, 162, 97, 0.25)');
-    }
-    underGlow.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.globalAlpha = isSelected ? 0.55 : 0.72;
-    ctx.fillStyle = underGlow;
-    ctx.beginPath();
-    ctx.ellipse(cx, cy + unit * 0.16, unit * 0.52, unit * 0.28, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
-    // Diorama ilustrado con bordes difuminados (sin marco rectangular)
-    const roomImg = this.assets ? this.assets.getImageForAgent(agent, tpl.id) : null;
-    if (roomImg) {
-      const feathered = this.getFeatheredRoomCanvas(roomImg);
-      ctx.drawImage(feathered, left, top, imgSize, imgSize);
-    } else {
-      this.drawCozyFallbackDiorama(ctx, left, top, imgSize, imgSize * 0.85, agent, tpl);
-    }
-
-    // Personaje vivo dentro de su sala
-    const anchor = agent.charAnchor || tpl.defaultAnchor || { x: 0.5, y: 0.65 };
-    const bob = activity === 'working' ? Math.abs(Math.sin(this.t * 6.5)) * 4 : Math.sin(this.t * 2.2 + cx * 0.02) * 1.8;
-    const charX = left + imgSize * anchor.x;
-    const charY = top + imgSize * (anchor.y - 0.02) - bob;
-    const charScale = Math.max(0.75, Math.min(1.12, unit / 260));
-    this.drawCozyCharacter(ctx, charX, charY, charScale, agent.avatar, status, activity);
-
-    // Placa flotante limpia al pie del diorama (Nombre + Semáforo + mini dato)
-    const plateY = cy + unit * 0.36;
-    const shortInfo = this.getShortHeadline(agent, live);
-    ctx.font = '800 11.5px -apple-system, BlinkMacSystemFont, sans-serif';
-    const titleW = ctx.measureText(agent.name).width;
-    ctx.font = '500 10px -apple-system, BlinkMacSystemFont, sans-serif';
-    const subText = this.truncateText(ctx, shortInfo, unit * 0.84);
-    const subW = ctx.measureText(subText).width;
-    const plateW = Math.min(unit * 0.96, Math.max(titleW + 34, subW + 24, 126));
-    const plateH = 36;
-
-    ctx.save();
-    ctx.fillStyle = 'rgba(20, 21, 25, 0.88)';
-    ctx.beginPath();
-    ctx.roundRect(cx - plateW / 2, plateY - plateH / 2, plateW, plateH, 11);
-    ctx.fill();
-    ctx.strokeStyle = isSelected ? accentColor : status === 'ROJO' ? statusColor : 'rgba(244, 162, 97, 0.28)';
-    ctx.lineWidth = isSelected || status === 'ROJO' ? 1.7 : 1;
-    ctx.stroke();
-
-    // Punto de semáforo
-    ctx.fillStyle = statusColor;
-    ctx.beginPath();
-    ctx.arc(cx - plateW / 2 + 13, plateY - 6, status === 'ROJO' ? 4.2 + Math.sin(this.t * 6) * 0.9 : 3.8, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Nombre
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.font = '800 11.5px -apple-system, BlinkMacSystemFont, sans-serif';
-    ctx.fillStyle = '#fbf6ee';
-    ctx.fillText(this.truncateText(ctx, agent.name, plateW - 28), cx - plateW / 2 + 23, plateY - 6);
-
-    // Subdato vivo
-    ctx.font = '500 9.8px -apple-system, BlinkMacSystemFont, sans-serif';
-    ctx.fillStyle = status === 'ROJO' ? '#fca5a5' : status === 'AMARILLO' ? '#fcd34d' : '#b5aca0';
-    ctx.fillText(subText, cx - plateW / 2 + 12, plateY + 9);
-    ctx.restore();
-
-    // Burbuja temporal si existe
-    const bubble = this.bubbles.get(agent.id);
-    if (bubble && bubble.until > performance.now()) {
-      ctx.font = '700 10.5px -apple-system, sans-serif';
-      const bText = this.truncateText(ctx, bubble.text, unit * 0.8);
-      const bw = ctx.measureText(bText).width + 18;
-      const by = charY - 46 * charScale;
-      ctx.fillStyle = '#fffdf8';
-      ctx.beginPath();
-      ctx.roundRect(charX - bw / 2, by, bw, 22, 9);
-      ctx.fill();
-      ctx.fillStyle = '#1f1a17';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(bText, charX, by + 11);
-    }
-  }
-
-  // ==========================================================================
-  // COMPONENTES COMPARTIDOS (Fallback, Personaje, Utilidades)
-  // ==========================================================================
   drawCozyFallbackDiorama(ctx, x, y, w, h, agent, tpl) {
     const cx = x + w / 2;
     const cy = y + h * 0.56;
     const s = w * 0.34;
-
     const grad = ctx.createRadialGradient(cx, cy - s * 0.25, 8, cx, cy, s * 1.45);
     grad.addColorStop(0, tpl.lampGlow || 'rgba(244,162,97,0.32)');
     grad.addColorStop(1, 'rgba(20,21,24,0)');
     ctx.fillStyle = grad;
     ctx.fillRect(x, y, w, h);
 
-    this.drawPoly(
-      ctx,
-      [
-        { x: cx, y: cy - s * 0.45 },
-        { x: cx + s, y: cy + s * 0.05 },
-        { x: cx, y: cy + s * 0.55 },
-        { x: cx - s, y: cy + s * 0.05 }
-      ],
-      tpl.floorColor,
-      'rgba(255,240,220,0.14)',
-      1.2
-    );
-    this.drawPoly(
-      ctx,
-      [
-        { x: cx - s, y: cy + s * 0.05 },
-        { x: cx, y: cy - s * 0.45 },
-        { x: cx, y: cy - s * 1.18 },
-        { x: cx - s, y: cy - s * 0.68 }
-      ],
-      tpl.wallColor,
-      'rgba(0,0,0,0.2)',
-      1
-    );
-    this.drawPoly(
-      ctx,
-      [
-        { x: cx, y: cy - s * 0.45 },
-        { x: cx + s, y: cy + s * 0.05 },
-        { x: cx + s, y: cy - s * 0.68 },
-        { x: cx, y: cy - s * 1.18 }
-      ],
-      '#3a322c',
-      'rgba(0,0,0,0.2)',
-      1
-    );
+    this.drawPoly(ctx, [{ x: cx, y: cy - s * 0.45 }, { x: cx + s, y: cy + s * 0.05 }, { x: cx, y: cy + s * 0.55 }, { x: cx - s, y: cy + s * 0.05 }], tpl.floorColor, 'rgba(255,240,220,0.14)', 1.2);
+    this.drawPoly(ctx, [{ x: cx - s, y: cy + s * 0.05 }, { x: cx, y: cy - s * 0.45 }, { x: cx, y: cy - s * 1.18 }, { x: cx - s, y: cy - s * 0.68 }], tpl.wallColor, 'rgba(0,0,0,0.2)', 1);
+    this.drawPoly(ctx, [{ x: cx, y: cy - s * 0.45 }, { x: cx + s, y: cy + s * 0.05 }, { x: cx + s, y: cy - s * 0.68 }, { x: cx, y: cy - s * 1.18 }], '#3a322c', 'rgba(0,0,0,0.2)', 1);
   }
 
   drawCozyCharacter(ctx, cx, cy, scale, avatar, status, activity) {
@@ -808,16 +704,16 @@ export class OfficeRenderer {
     ctx.translate(cx, cy);
     ctx.scale(scale, scale);
 
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.44)';
     ctx.beginPath();
-    ctx.ellipse(0, 12, 16, 6.5, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 12, 15, 6, 0, 0, Math.PI * 2);
     ctx.fill();
 
     if (activity === 'working' || status === 'ROJO') {
       ctx.strokeStyle = status === 'ROJO' ? '#ef4444' : '#38bdf8';
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.ellipse(0, 12, 20 + Math.sin(this.t * 5) * 2.5, 8.5, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 12, 19 + Math.sin(this.t * 5) * 2.5, 8, 0, 0, Math.PI * 2);
       ctx.stroke();
     }
 

@@ -866,9 +866,20 @@ body.kiosk .topbar { display: none; }
   text-overflow: ellipsis;
 }
 
-/* Margen seguro en iPadOS para que los botones de ventana (rojo/amarillo/verde) no tapen el logo */
-@media (display-mode: standalone) and (pointer: coarse) {
-  .topbar {
-    padding-left: max(76px, env(titlebar-area-x, 76px));
+/* Fix definitivo para barra de estado de iPadOS (reloj, fecha, batería) en modo App / Pantalla de Inicio */
+@media (display-mode: standalone) {
+  .app-shell {
+    padding-top: max(42px, env(safe-area-inset-top, 42px));
+    background: var(--bg-elev);
+  }
+  body.kiosk .app-shell {
+    padding-top: max(36px, env(safe-area-inset-top, 36px));
+    background: var(--bg);
+  }
+  .exit-kiosk-btn {
+    top: max(46px, calc(env(safe-area-inset-top, 36px) + 10px));
+  }
+  .inspector-drawer {
+    top: 10px;
   }
 }

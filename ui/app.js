@@ -7,7 +7,7 @@ import { OfficeStore } from '../core/store.js';
 import { OfficeRenderer } from '../core/renderer.js';
 import { RoomAssetManager, compressImageFileToDataUrl } from '../core/assets.js';
 import { THEMES } from '../themes/themes.js';
-import { ROOM_TEMPLATES, getRoomTemplate } from '../config/rooms.js';
+import { ROOM_TEMPLATES, BUILDING_FLOORPLAN, getRoomTemplate } from '../config/rooms.js';
 import { parseSteamHistoryLines } from '../core/api.js';
 
 const store = new OfficeStore();
@@ -116,7 +116,7 @@ function bindGlobalEvents() {
   $('#btn-layout-toggle').addEventListener('click', async () => {
     const next = store.getLayoutMode() === 'cozy-rooms' ? 'open-floor' : 'cozy-rooms';
     await store.setLayoutMode(next);
-    toast(next === 'cozy-rooms' ? 'Vista: Salas Cozy en tarjetas' : 'Vista: Campus Cozy completo');
+    toast(next === 'cozy-rooms' ? 'Vista: Salas Separadas' : 'Vista: Edificio Cozy Completo');
   });
 
   $('#btn-sync').addEventListener('click', async () => {
@@ -272,6 +272,7 @@ function renderAll(triggerRemodel = false) {
   `;
 
   renderer.setScene({
+    office,
     agents: office.agents,
     agentData: store.state.data,
     themeId: store.getActiveThemeId(),
@@ -313,6 +314,7 @@ function renderQuickbar() {
       renderQuickbar();
       openInspector(btn.dataset.agent);
       renderer.setScene({
+        office,
         agents: office.agents,
         agentData: store.state.data,
         themeId: store.getActiveThemeId(),
@@ -894,7 +896,11 @@ function renderRoomsGallery() {
   const el = $('#rooms-gallery');
   if (!el || !assetManager) return;
 
-  el.innerHTML = Object.values(ROOM_TEMPLATES)
+  const allAssets = [
+    { id: BUILDING_FLOORPLAN.id, name: 'Edificio Completo', icon: '🏢', fileBase: BUILDING_FLOORPLAN.fileBase },
+    ...Object.values(ROOM_TEMPLATES)
+  ];
+  el.innerHTML = allAssets
     .map((tpl) => {
       const status = assetManager.getTemplateStatus(tpl.id);
       const src = assetManager.getTemplateSrc(tpl.id);
@@ -922,7 +928,8 @@ function renderRoomsGallery() {
       try {
         const dataUrl = await compressImageFileToDataUrl(file);
         assetManager.setCustomRoomImage(inp.dataset.uploadRoom, dataUrl);
-        toast(`Imagen cargada en ${ROOM_TEMPLATES[inp.dataset.uploadRoom].name}`);
+        const label = inp.dataset.uploadRoom === BUILDING_FLOORPLAN.id ? BUILDING_FLOORPLAN.name : ROOM_TEMPLATES[inp.dataset.uploadRoom].name;
+        toast(`Imagen cargada en ${label}`);
       } catch (err) {
         toast(err.message, true);
       }
@@ -982,7 +989,7 @@ function bindDesignView() {
 
   $('#btn-mode-open').addEventListener('click', async () => {
     await store.setLayoutMode('open-floor');
-    toast('Modo Campus Cozy Completo activado');
+    toast('Vista Edificio Cozy Completo activada');
   });
 
   $('#btn-save-connection').addEventListener('click', async () => {
