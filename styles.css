@@ -901,3 +901,74 @@ body.kiosk .app-shell {
   object-fit: contain !important;
   padding: 6px;
 }
+
+
+/* ==========================================================================
+   V3.4 TABLERO SEPARADO POR SECCIONES (FINANZAS/HOGAR vs ENTRETENIMIENTO)
+   ========================================================================== */
+.dash-filter-pills {
+  display: inline-flex;
+  gap: 4px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 3px;
+}
+.filter-pill {
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  border-radius: 8px;
+  padding: 6px 11px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.filter-pill:hover { color: var(--text); }
+.filter-pill.active {
+  background: var(--accent);
+  color: #16110c;
+}
+
+#dashboard-grid.dashboard-sections {
+  display: flex !important;
+  flex-direction: column;
+  gap: 24px;
+}
+.dash-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.dash-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.dash-section-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dash-section-count {
+  font-size: 0.76rem;
+  color: var(--muted);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  padding: 2px 9px;
+  border-radius: 999px;
+}
+.dash-section-grid {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}

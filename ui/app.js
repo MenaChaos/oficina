@@ -3,18 +3,19 @@
  * Conecta OfficeStore, RoomAssetManager, OfficeRenderer y BridgeAPI.
  */
 
-import { OfficeStore } from '../core/store.js?v=3.3';
-import { OfficeRenderer } from '../core/renderer.js?v=3.3';
-import { RoomAssetManager, compressImageFileToDataUrl } from '../core/assets.js?v=3.3';
+import { OfficeStore } from '../core/store.js?v=3.4';
+import { OfficeRenderer } from '../core/renderer.js?v=3.4';
+import { RoomAssetManager, compressImageFileToDataUrl } from '../core/assets.js?v=3.4';
 import { THEMES } from '../themes/themes.js';
-import { ROOM_TEMPLATES, BUILDING_FLOORPLAN, getRoomTemplate } from '../config/rooms.js?v=3.3';
-import { AVATAR_TEMPLATES } from '../config/avatars.js?v=3.3';
+import { ROOM_TEMPLATES, BUILDING_FLOORPLAN, getRoomTemplate } from '../config/rooms.js?v=3.4';
+import { AVATAR_TEMPLATES } from '../config/avatars.js?v=3.4';
 import { parseSteamHistoryLines } from '../core/api.js';
 
 const store = new OfficeStore();
 let assetManager = null;
 let renderer = null;
 let refreshTimer = null;
+let activeDashCategory = 'all';
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -180,6 +181,15 @@ function bindGlobalEvents() {
   });
 
   $('#dash-refresh-btn').addEventListener('click', () => $('#btn-sync').click());
+
+  $$('#dash-filter-pills .filter-pill').forEach((pill) => {
+    pill.addEventListener('click', () => {
+      $$('#dash-filter-pills .filter-pill').forEach((p) => p.classList.remove('active'));
+      pill.classList.add('active');
+      activeDashCategory = pill.dataset.cat || 'all';
+      renderDashboard();
+    });
+  });
 
   $('#btn-dim').addEventListener('click', () => {
     store.state.prefs.dim = !store.state.prefs.dim;
@@ -484,10 +494,14 @@ function buildAgentDetailHTML(agent, live, compact = false) {
       <div class="kpi-box"><div class="kpi-label">Temp Máx</div><div class="kpi-val">${esc(uv.tempMaxC)}°C</div></div>
       <div class="kpi-box"><div class="kpi-label">Volt. Mín</div><div class="kpi-val">${esc(uv.voltajeMinV)} V</div></div>
     </div>
-    <div class="text-block"><h4>Acción Recomendada</h4>${esc(t.accionRecomendada)}</div>`;
+    </div>`;
 
     if (compact) {
       html += `<details class="collapsible-block">
+        <summary>💡 Acción Recomendada</summary>
+        <div class="collapsible-content">${esc(t.accionRecomendada)}</div>
+      </details>
+      <details class="collapsible-block">
         <summary>📋 Diagnóstico Preventivo completo</summary>
         <div class="collapsible-content">${esc(t.resumenEstado)}</div>
       </details>
@@ -496,7 +510,8 @@ function buildAgentDetailHTML(agent, live, compact = false) {
         <div class="collapsible-content">${esc(t.tendenciaHistorica)}</div>
       </details>`;
     } else {
-      html += `<div class="text-block"><h4>Diagnóstico Preventivo</h4>${esc(t.resumenEstado)}</div>
+      html += `<div class="text-block"><h4>Acción Recomendada</h4>${esc(t.accionRecomendada)}</div>
+      <div class="text-block"><h4>Diagnóstico Preventivo</h4>${esc(t.resumenEstado)}</div>
       <div class="text-block"><h4>Tendencia Histórica</h4>${esc(t.tendenciaHistorica)}</div>`;
     }
   }
@@ -618,11 +633,24 @@ function bindAgentDetailActions(container, agent) {
   });
 }
 
+function inferAgentCategory(agent) {
+  if (agent.category && ['hogar', 'entretenimiento', 'otros'].includes(agent.category)) {
+    return agent.category;
+  }
+  if (['servicios_hogar', 'combustible_copec', 'mg6_mecanico'].includes(agent.adapter)) {
+    return 'hogar';
+  }
+  if (agent.id === 'simurdiera' || agent.id === 'prof-farnsworth' || agent.adapter === 'github_action') {
+    return 'entretenimiento';
+  }
+  return 'otros';
+}
+
 function estimateCardWeight(agent) {
   const weights = {
     servicios_hogar: 3.6,
-    combustible_copec: 4.2,
-    mg6_mecanico: 3.8,
+    combustible_copec: 4.0,
+    mg6_mecanico: 3.2,
     github_action: agent.config?.readFile ? 3.5 : 1.7
   };
   return weights[agent.adapter] || 2.2;
@@ -643,38 +671,67 @@ function renderDashboard() {
   }
 
   const grid = $('#dashboard-grid');
-  const w = window.innerWidth;
-  const colCount = w >= 1020 ? 3 : w >= 680 ? 2 : 1;
+  grid.classList.add('dashboard-sections');
 
-  // Distribuir tarjetas en columnas balanceadas (Masonry real sin huecos vacíos)
-  const columns = Array.from({ length: colCount }, () => ({ weight: 0, html: [] }));
+  const sectionDefs = [
+    { key: 'hogar', title: '🏠 Finanzas, Hogar y Vehículo', agents: [] },
+    { key: 'entretenimiento', title: '🎮 Entretenimiento y Bots', agents: [] },
+    { key: 'otros', title: '⚡ Otros Proyectos', agents: [] }
+  ];
 
   office.agents.forEach((agent) => {
-    const live = store.state.data[agent.id] || {};
-    const status = agent.enabled === false ? 'PAUSADO' : live.status || 'VERDE';
-    const tpl = getRoomTemplate(agent.roomStyle, agent);
-    const cardHtml = `<article class="widget-card" data-widget-agent="${esc(agent.id)}">
-      <div class="widget-head">
-        <div>
-          <h3>${tpl.icon} ${esc(agent.name)}</h3>
-          <div class="muted">${esc(tpl.shortName || tpl.name)} · ${esc(agent.role)}</div>
-        </div>
-        <span class="status-badge ${status}">${status}</span>
-      </div>
-      <div class="form-stack">${buildAgentDetailHTML(agent, live, true)}</div>
-    </article>`;
-
-    // Colocar siempre en la columna más corta para eliminar espacios muertos
-    let shortest = columns[0];
-    for (let i = 1; i < columns.length; i++) {
-      if (columns[i].weight < shortest.weight) shortest = columns[i];
-    }
-    shortest.html.push(cardHtml);
-    shortest.weight += estimateCardWeight(agent);
+    const cat = inferAgentCategory(agent);
+    const target = sectionDefs.find((s) => s.key === cat) || sectionDefs[2];
+    target.agents.push(agent);
   });
 
-  grid.innerHTML = columns
-    .map((col) => `<div class="masonry-col">${col.html.join('')}</div>`)
+  const visibleSections = sectionDefs.filter((sec) => {
+    if (sec.agents.length === 0) return false;
+    if (activeDashCategory !== 'all' && sec.key !== activeDashCategory) return false;
+    return true;
+  });
+
+  const w = window.innerWidth;
+  const maxCols = w >= 1020 ? 3 : w >= 680 ? 2 : 1;
+
+  grid.innerHTML = visibleSections
+    .map((sec) => {
+      const colCount = Math.min(maxCols, Math.max(1, sec.agents.length));
+      const columns = Array.from({ length: colCount }, () => ({ weight: 0, html: [] }));
+
+      sec.agents.forEach((agent) => {
+        const live = store.state.data[agent.id] || {};
+        const status = agent.enabled === false ? 'PAUSADO' : live.status || 'VERDE';
+        const tpl = getRoomTemplate(agent.roomStyle, agent);
+        const cardHtml = `<article class="widget-card" data-widget-agent="${esc(agent.id)}">
+          <div class="widget-head">
+            <div>
+              <h3>${tpl.icon} ${esc(agent.name)}</h3>
+              <div class="muted">${esc(tpl.shortName || tpl.name)} · ${esc(agent.role)}</div>
+            </div>
+            <span class="status-badge ${status}">${status}</span>
+          </div>
+          <div class="form-stack">${buildAgentDetailHTML(agent, live, true)}</div>
+        </article>`;
+
+        let shortest = columns[0];
+        for (let i = 1; i < columns.length; i++) {
+          if (columns[i].weight < shortest.weight) shortest = columns[i];
+        }
+        shortest.html.push(cardHtml);
+        shortest.weight += estimateCardWeight(agent);
+      });
+
+      return `<section class="dash-section">
+        <div class="dash-section-header">
+          <h3 class="dash-section-title">${sec.title}</h3>
+          <span class="dash-section-count">${sec.agents.length} agente(s)</span>
+        </div>
+        <div class="dash-section-grid">
+          ${columns.map((col) => `<div class="masonry-col">${col.html.join('')}</div>`).join('')}
+        </div>
+      </section>`;
+    })
     .join('');
 
   office.agents.forEach((agent) => {
@@ -854,6 +911,7 @@ function collectAgentFromForm() {
     roomStyle: $('#af-room-style').value,
     roomImageUrl: $('#af-room-image').value.trim() || '',
     roomAccent: $('#af-room-accent').value,
+    category: $('#af-category').value,
     adapter,
     enabled: $('#af-enabled').value === 'true',
     config
@@ -870,6 +928,7 @@ function openAgentModal(agent = null) {
   $('#af-room-style').value = tpl.id;
   $('#af-room-image').value = agent?.roomImageUrl || '';
   $('#af-room-accent').value = agent?.roomAccent || tpl.accent || '#f4a261';
+  $('#af-category').value = agent ? inferAgentCategory(agent) : 'entretenimiento';
   $('#af-adapter').value = agent ? agent.adapter : 'github_action';
   $('#af-enabled').value = agent && agent.enabled === false ? 'false' : 'true';
   $('#af-test-result').textContent = '';

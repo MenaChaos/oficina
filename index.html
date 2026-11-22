@@ -7,7 +7,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black" />
   <meta name="apple-mobile-web-app-title" content="Oficina OS" />
   <title>MenaChaos OS — Oficina Virtual Cozy</title>
-  <link rel="stylesheet" href="./styles.css?v=3.3" />
+  <link rel="stylesheet" href="./styles.css?v=3.4" />
 </head>
 <body>
   <div id="dim-overlay" class="dim-overlay" aria-hidden="true"></div>
@@ -123,7 +123,14 @@
             <h2>Tablero Operativo</h2>
             <p class="muted" id="dash-subtitle">Vista consolidada de tu oficina activa</p>
           </div>
-          <button id="dash-refresh-btn" class="btn btn-secondary">🔄 Actualizar datos</button>
+          <div class="btn-row">
+            <div class="dash-filter-pills" id="dash-filter-pills">
+              <button class="filter-pill active" data-cat="all">Todo</button>
+              <button class="filter-pill" data-cat="hogar">🏠 Finanzas y Hogar</button>
+              <button class="filter-pill" data-cat="entretenimiento">🎮 Entretenimiento</button>
+            </div>
+            <button id="dash-refresh-btn" class="btn btn-secondary">🔄 Actualizar</button>
+          </div>
         </div>
         <div id="dashboard-alerts-box" class="alerts-banner hidden"></div>
         <div id="dashboard-grid" class="dashboard-grid"></div>
@@ -319,9 +326,18 @@
           </div>
         </div>
 
-        <div>
-          <label class="field-label">Tipo de Conector (Adaptador)</label>
-          <select id="af-adapter" class="input">
+        <div class="form-row-2">
+          <div>
+            <label class="field-label">Sección en Tablero</label>
+            <select id="af-category" class="input">
+              <option value="hogar">🏠 Finanzas, Hogar y Vehículo</option>
+              <option value="entretenimiento">🎮 Entretenimiento y Bots</option>
+              <option value="otros">⚡ Otros Proyectos</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-label">Tipo de Conector (Adaptador)</label>
+            <select id="af-adapter" class="input">
             <option value="github_action">GitHub Actions (Repo + Archivo)</option>
             <option value="google_sheet">Google Sheet genérico</option>
             <option value="webhook_json">Webhook / Endpoint JSON</option>
@@ -329,6 +345,7 @@
             <option value="combustible_copec">Control COPEC</option>
             <option value="mg6_mecanico">Monitor Vehículo OBD-II</option>
           </select>
+          </div>
         </div>
 
         <div id="af-dynamic-fields" class="dynamic-fields-box"></div>
@@ -393,6 +410,6 @@
 
   <div id="toast-container" class="toast-container"></div>
 
-  <script type="module" src="./ui/app.js?v=3.3"></script>
+  <script type="module" src="./ui/app.js?v=3.4"></script>
 </body>
 </html>
