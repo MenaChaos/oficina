@@ -103,6 +103,7 @@ function bindGlobalEvents() {
       $$('.view').forEach((v) => v.classList.remove('active'));
       $('#view-' + target).classList.add('active');
       if (target === 'office') setTimeout(() => renderer.resize(), 40);
+      if (target === 'dashboard') renderDashboard();
     });
   });
 
@@ -115,7 +116,7 @@ function bindGlobalEvents() {
   $('#btn-layout-toggle').addEventListener('click', async () => {
     const next = store.getLayoutMode() === 'cozy-rooms' ? 'open-floor' : 'cozy-rooms';
     await store.setLayoutMode(next);
-    toast(next === 'cozy-rooms' ? 'Vista: Salas Cozy separadas' : 'Vista: Planta abierta');
+    toast(next === 'cozy-rooms' ? 'Vista: Salas Cozy en tarjetas' : 'Vista: Campus Cozy completo');
   });
 
   $('#btn-sync').addEventListener('click', async () => {
@@ -348,7 +349,14 @@ function closeInspector() {
   renderQuickbar();
 }
 
-function buildAgentDetailHTML(agent, live) {
+function formatShortSteamDate(dateStr) {
+  const m = String(dateStr || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return dateStr || '';
+  const meses = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+  return `${Number(m[3])} ${meses[Number(m[2]) - 1] || m[2]}`;
+}
+
+function buildAgentDetailHTML(agent, live, compact = false) {
   if (!live || Object.keys(live).length === 0) {
     return `<div class="text-block">Sin datos cargados todavía. Pulsa 🔄 para sincronizar con tu puente.</div>`;
   }
@@ -395,17 +403,21 @@ function buildAgentDetailHTML(agent, live) {
     }
 
     if (Array.isArray(live.pendingReimbursements) && live.pendingReimbursements.length > 0) {
-      html += `<div class="mini-list">` +
-        live.pendingReimbursements
-          .slice(0, 6)
-          .map(
-            (r) => `<div class="mini-row">
-              <div><strong>${esc(r.fecha)}</strong> · ${esc(r.combustible)} <strong>${esc(r.montoDisplay)}</strong></div>
-              <button class="btn btn-sm btn-primary" data-action="reimburse" data-row="${r.rowNumber}">✓ Reemb.</button>
-            </div>`
-          )
-          .join('') +
-        `</div>`;
+      const visibleCount = compact ? 3 : 6;
+      const topRows = live.pendingReimbursements.slice(0, visibleCount);
+      const restRows = live.pendingReimbursements.slice(visibleCount, 10);
+      const renderReembRow = (r) => `<div class="mini-row">
+        <div><strong>${esc(r.fecha)}</strong> · ${esc(r.combustible)} <strong>${esc(r.montoDisplay)}</strong></div>
+        <button class="btn btn-sm btn-primary" data-action="reimburse" data-row="${r.rowNumber}">✓ Reemb.</button>
+      </div>`;
+
+      html += `<div class="mini-list">${topRows.map(renderReembRow).join('')}</div>`;
+      if (restRows.length > 0) {
+        html += `<details class="collapsible-block">
+          <summary>Ver ${restRows.length} boleta(s) pendiente(s) más</summary>
+          <div class="mini-list" style="margin-top:8px">${restRows.map(renderReembRow).join('')}</div>
+        </details>`;
+      }
     }
   }
 
@@ -419,9 +431,21 @@ function buildAgentDetailHTML(agent, live) {
       <div class="kpi-box"><div class="kpi-label">Temp Máx</div><div class="kpi-val">${esc(uv.tempMaxC)}°C</div></div>
       <div class="kpi-box"><div class="kpi-label">Volt. Mín</div><div class="kpi-val">${esc(uv.voltajeMinV)} V</div></div>
     </div>
-    <div class="text-block"><h4>Diagnóstico Preventivo</h4>${esc(t.resumenEstado)}</div>
-    <div class="text-block"><h4>Acción Recomendada</h4>${esc(t.accionRecomendada)}</div>
-    <div class="text-block"><h4>Tendencia Histórica</h4>${esc(t.tendenciaHistorica)}</div>`;
+    <div class="text-block"><h4>Acción Recomendada</h4>${esc(t.accionRecomendada)}</div>`;
+
+    if (compact) {
+      html += `<details class="collapsible-block">
+        <summary>📋 Diagnóstico Preventivo completo</summary>
+        <div class="collapsible-content">${esc(t.resumenEstado)}</div>
+      </details>
+      <details class="collapsible-block">
+        <summary>📈 Tendencia Histórica (3–6 meses)</summary>
+        <div class="collapsible-content">${esc(t.tendenciaHistorica)}</div>
+      </details>`;
+    } else {
+      html += `<div class="text-block"><h4>Diagnóstico Preventivo</h4>${esc(t.resumenEstado)}</div>
+      <div class="text-block"><h4>Tendencia Histórica</h4>${esc(t.tendenciaHistorica)}</div>`;
+    }
   }
 
   if (live.github && live.github.repo) {
@@ -441,11 +465,14 @@ function buildAgentDetailHTML(agent, live) {
       html += `<div><div class="field-label">Últimos juegos detectados en Steam (${live.filePreview.totalLines} en bitácora)</div>
         <div class="steam-grid">` +
         steamGames
-          .slice(0, 6)
+          .slice(0, compact ? 4 : 6)
           .map(
             (g) => `<a class="steam-card" href="${g.storeUrl}" target="_blank" rel="noopener">
               <img src="${g.imageUrl}" onerror="this.src='${g.fallbackUrl}'" alt="Steam ${g.appId}" loading="lazy" />
-              <div class="steam-card-info"><strong>App #${g.appId}</strong><span class="muted">${esc(g.date)}</span></div>
+              <div class="steam-card-info">
+                <strong>#${g.appId}</strong>
+                <span class="muted">${esc(formatShortSteamDate(g.date))}</span>
+              </div>
             </a>`
           )
           .join('') +
@@ -538,6 +565,16 @@ function bindAgentDetailActions(container, agent) {
   });
 }
 
+function estimateCardWeight(agent) {
+  const weights = {
+    servicios_hogar: 3.6,
+    combustible_copec: 4.2,
+    mg6_mecanico: 3.8,
+    github_action: agent.config?.readFile ? 3.5 : 1.7
+  };
+  return weights[agent.adapter] || 2.2;
+}
+
 function renderDashboard() {
   const office = store.getActiveOffice();
   $('#dash-subtitle').textContent = `${office.icon || '🏡'} ${office.name} — ${office.agents.length} agentes configurados`;
@@ -553,22 +590,38 @@ function renderDashboard() {
   }
 
   const grid = $('#dashboard-grid');
-  grid.innerHTML = office.agents
-    .map((agent) => {
-      const live = store.state.data[agent.id] || {};
-      const status = agent.enabled === false ? 'PAUSADO' : live.status || 'VERDE';
-      const tpl = getRoomTemplate(agent.roomStyle, agent);
-      return `<article class="widget-card" data-widget-agent="${esc(agent.id)}">
-        <div class="widget-head">
-          <div>
-            <h3>${tpl.icon} ${esc(agent.name)}</h3>
-            <div class="muted">${esc(tpl.name)} · ${esc(agent.role)}</div>
-          </div>
-          <span class="status-badge ${status}">${status}</span>
+  const w = window.innerWidth;
+  const colCount = w >= 1020 ? 3 : w >= 680 ? 2 : 1;
+
+  // Distribuir tarjetas en columnas balanceadas (Masonry real sin huecos vacíos)
+  const columns = Array.from({ length: colCount }, () => ({ weight: 0, html: [] }));
+
+  office.agents.forEach((agent) => {
+    const live = store.state.data[agent.id] || {};
+    const status = agent.enabled === false ? 'PAUSADO' : live.status || 'VERDE';
+    const tpl = getRoomTemplate(agent.roomStyle, agent);
+    const cardHtml = `<article class="widget-card" data-widget-agent="${esc(agent.id)}">
+      <div class="widget-head">
+        <div>
+          <h3>${tpl.icon} ${esc(agent.name)}</h3>
+          <div class="muted">${esc(tpl.shortName || tpl.name)} · ${esc(agent.role)}</div>
         </div>
-        <div class="form-stack">${buildAgentDetailHTML(agent, live)}</div>
-      </article>`;
-    })
+        <span class="status-badge ${status}">${status}</span>
+      </div>
+      <div class="form-stack">${buildAgentDetailHTML(agent, live, true)}</div>
+    </article>`;
+
+    // Colocar siempre en la columna más corta para eliminar espacios muertos
+    let shortest = columns[0];
+    for (let i = 1; i < columns.length; i++) {
+      if (columns[i].weight < shortest.weight) shortest = columns[i];
+    }
+    shortest.html.push(cardHtml);
+    shortest.weight += estimateCardWeight(agent);
+  });
+
+  grid.innerHTML = columns
+    .map((col) => `<div class="masonry-col">${col.html.join('')}</div>`)
     .join('');
 
   office.agents.forEach((agent) => {
@@ -929,7 +982,7 @@ function bindDesignView() {
 
   $('#btn-mode-open').addEventListener('click', async () => {
     await store.setLayoutMode('open-floor');
-    toast('Modo Planta Abierta activado');
+    toast('Modo Campus Cozy Completo activado');
   });
 
   $('#btn-save-connection').addEventListener('click', async () => {
@@ -992,4 +1045,11 @@ function bindDesignView() {
   });
 }
 
+let dashResizeTimer = null;
+window.addEventListener('resize', () => {
+  if ($('#view-dashboard').classList.contains('active')) {
+    clearTimeout(dashResizeTimer);
+    dashResizeTimer = setTimeout(renderDashboard, 140);
+  }
+});
 window.addEventListener('DOMContentLoaded', init);

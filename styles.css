@@ -801,3 +801,74 @@ body.kiosk .topbar { display: none; }
 .room-gal-name { font-weight: 700; font-size: 0.85rem; }
 .room-gal-file { font-size: 0.72rem; color: var(--muted); word-break: break-all; }
 .btn-active-mode { border-color: var(--accent) !important; background: var(--accent) !important; color: #16110c !important; }
+
+
+/* ==========================================================================
+   V3.1 MASONRY DASHBOARD, COLLAPSIBLES & IPADOS WINDOW CLEARANCE
+   ========================================================================== */
+.dashboard-grid {
+  display: flex !important;
+  align-items: flex-start;
+  gap: 16px;
+}
+.masonry-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.collapsible-block {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 9px 12px;
+  font-size: 0.82rem;
+}
+.collapsible-block summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--accent);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.collapsible-block summary::-webkit-details-marker { display: none; }
+.collapsible-block summary::after {
+  content: '▾';
+  font-size: 0.9rem;
+  color: var(--muted);
+  transition: transform 0.2s ease;
+}
+.collapsible-block[open] summary::after {
+  transform: rotate(180deg);
+}
+.collapsible-content {
+  margin-top: 8px;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.steam-card-info {
+  padding: 6px 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+.steam-card-info strong,
+.steam-card-info span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Margen seguro en iPadOS para que los botones de ventana (rojo/amarillo/verde) no tapen el logo */
+@media (display-mode: standalone) and (pointer: coarse) {
+  .topbar {
+    padding-left: max(76px, env(titlebar-area-x, 76px));
+  }
+}
