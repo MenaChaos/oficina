@@ -3,11 +3,12 @@
  * Conecta OfficeStore, RoomAssetManager, OfficeRenderer y BridgeAPI.
  */
 
-import { OfficeStore } from '../core/store.js';
-import { OfficeRenderer } from '../core/renderer.js';
-import { RoomAssetManager, compressImageFileToDataUrl } from '../core/assets.js';
+import { OfficeStore } from '../core/store.js?v=3.3';
+import { OfficeRenderer } from '../core/renderer.js?v=3.3';
+import { RoomAssetManager, compressImageFileToDataUrl } from '../core/assets.js?v=3.3';
 import { THEMES } from '../themes/themes.js';
-import { ROOM_TEMPLATES, BUILDING_FLOORPLAN, getRoomTemplate } from '../config/rooms.js';
+import { ROOM_TEMPLATES, BUILDING_FLOORPLAN, getRoomTemplate } from '../config/rooms.js?v=3.3';
+import { AVATAR_TEMPLATES } from '../config/avatars.js?v=3.3';
 import { parseSteamHistoryLines } from '../core/api.js';
 
 const store = new OfficeStore();
@@ -34,9 +35,59 @@ function toast(msg, isError = false) {
   setTimeout(() => el.remove(), 3600);
 }
 
+
+// ---- Detección y ajuste automático de barra superior / botones ventana en iPadOS ----
+function detectIsIPad() {
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  );
+}
+
+function detectIsStandalone() {
+  return (
+    window.navigator.standalone === true ||
+    (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+  );
+}
+
+function applyIPadSafeLayout() {
+  const isIPad = detectIsIPad();
+  const isStandalone = detectIsStandalone();
+  const prefs = store.state.prefs || {};
+  const topPref = prefs.ipadTop ?? 'auto';
+  const leftPref = prefs.ipadLeft ?? 'auto';
+
+  let topPx = 0;
+  if (topPref === 'auto') {
+    // En iPad (tanto pantalla completa como app desde inicio), despejar siempre la barra de reloj/batería
+    if (isIPad && isStandalone) topPx = 36;
+    else if (isIPad) topPx = 28;
+  } else {
+    topPx = Number(topPref) || 0;
+  }
+
+  let leftPx = 0;
+  if (leftPref === 'auto') {
+    // En iPadOS con controles de ventana (rojo/amarillo/verde), despejar la esquina izquierda del topbar
+    if (isIPad) leftPx = 76;
+  } else {
+    leftPx = Number(leftPref) || 0;
+  }
+
+  document.documentElement.style.setProperty('--ipad-top-offset', `${topPx}px`);
+  document.documentElement.style.setProperty('--ipad-left-offset', `${leftPx}px`);
+  if (renderer) setTimeout(() => renderer.resize(), 40);
+}
+
 function init() {
+  applyIPadSafeLayout();
   assetManager = new RoomAssetManager(() => {
     renderRoomsGallery();
+  renderAvatarsGallery();
+  if ($('#cfg-ipad-top')) $('#cfg-ipad-top').value = String(store.state.prefs.ipadTop ?? 'auto');
+  if ($('#cfg-ipad-left')) $('#cfg-ipad-left').value = String(store.state.prefs.ipadLeft ?? 'auto');
+    renderAvatarsGallery();
   });
 
   renderer = new OfficeRenderer($('#office-canvas'), assetManager, (agentId) => {
@@ -945,6 +996,55 @@ function renderRoomsGallery() {
   });
 }
 
+
+function renderAvatarsGallery() {
+  const el = $('#avatars-gallery');
+  if (!el || !assetManager) return;
+
+  el.innerHTML = Object.values(AVATAR_TEMPLATES)
+    .map((av) => {
+      const status = assetManager.getAvatarStatus(av.id);
+      const src = assetManager.getAvatarPreviewUrl(av.id);
+      return `<div class="room-gallery-card">
+        <div class="room-thumb avatar-thumb-bg">
+          ${src ? `<img src="${src}" alt="${esc(av.name)}" />` : `<span>${av.icon}<br/><code>${av.fileBase}.jpg</code></span>`}
+        </div>
+        <div class="room-gal-name">${av.icon} ${esc(av.name)}</div>
+        <div class="room-gal-file">${status === 'loaded' ? '✓ Recortado OK' : `assets/avatars/${av.fileBase}.jpg`}</div>
+        <div class="btn-row">
+          <label class="btn btn-sm btn-secondary file-btn" style="flex:1">
+            📷 Cargar
+            <input type="file" accept="image/*" data-upload-avatar="${av.id}" hidden />
+          </label>
+          ${assetManager.customAvatars[av.id] ? `<button class="btn btn-sm btn-danger-ghost" data-clear-avatar="${av.id}">✕</button>` : ''}
+        </div>
+      </div>`;
+    })
+    .join('');
+
+  el.querySelectorAll('[data-upload-avatar]').forEach((inp) => {
+    inp.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try {
+        const dataUrl = await compressImageFileToDataUrl(file, 512, 0.9);
+        assetManager.setCustomAvatarImage(inp.dataset.uploadAvatar, dataUrl);
+        toast(`Personaje "${AVATAR_TEMPLATES[inp.dataset.uploadAvatar].name}" cargado`);
+      } catch (err) {
+        toast(err.message, true);
+      }
+      e.target.value = '';
+    });
+  });
+
+  el.querySelectorAll('[data-clear-avatar]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      assetManager.setCustomAvatarImage(btn.dataset.clearAvatar, null);
+      toast('Restaurada ruta assets/avatars/');
+    });
+  });
+}
+
 function renderDesignPanel() {
   const layoutMode = store.getLayoutMode();
   $('#btn-mode-cozy').classList.toggle('btn-active-mode', layoutMode === 'cozy-rooms');
@@ -975,6 +1075,9 @@ function renderDesignPanel() {
   });
 
   renderRoomsGallery();
+  renderAvatarsGallery();
+  if ($('#cfg-ipad-top')) $('#cfg-ipad-top').value = String(store.state.prefs.ipadTop ?? 'auto');
+  if ($('#cfg-ipad-left')) $('#cfg-ipad-left').value = String(store.state.prefs.ipadLeft ?? 'auto');
 
   if (document.activeElement !== $('#cfg-bridge-url')) $('#cfg-bridge-url').value = store.state.bridgeUrl;
   if (document.activeElement !== $('#cfg-api-secret')) $('#cfg-api-secret').value = store.state.apiSecret;
@@ -982,6 +1085,20 @@ function renderDesignPanel() {
 }
 
 function bindDesignView() {
+  $('#cfg-ipad-top').addEventListener('change', (e) => {
+    store.state.prefs.ipadTop = e.target.value;
+    store.saveLocalPrefs();
+    applyIPadSafeLayout();
+    toast('Margen superior iPad actualizado');
+  });
+
+  $('#cfg-ipad-left').addEventListener('change', (e) => {
+    store.state.prefs.ipadLeft = e.target.value;
+    store.saveLocalPrefs();
+    applyIPadSafeLayout();
+    toast('Margen botones ventana actualizado');
+  });
+
   $('#btn-mode-cozy').addEventListener('click', async () => {
     await store.setLayoutMode('cozy-rooms');
     toast('Modo Salas Cozy activado');

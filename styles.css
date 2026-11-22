@@ -866,20 +866,38 @@ body.kiosk .topbar { display: none; }
   text-overflow: ellipsis;
 }
 
-/* Fix definitivo para barra de estado de iPadOS (reloj, fecha, batería) en modo App / Pantalla de Inicio */
-@media (display-mode: standalone) {
-  .app-shell {
-    padding-top: max(42px, env(safe-area-inset-top, 42px));
-    background: var(--bg-elev);
-  }
-  body.kiosk .app-shell {
-    padding-top: max(36px, env(safe-area-inset-top, 36px));
-    background: var(--bg);
-  }
-  .exit-kiosk-btn {
-    top: max(46px, calc(env(safe-area-inset-top, 36px) + 10px));
-  }
-  .inspector-drawer {
-    top: 10px;
-  }
+/* ==========================================================================
+   V3.3 FIX DEFINITIVO IPADOS (BARRA DE ESTADO + BOTONES DE VENTANA) & AVATARS
+   ========================================================================== */
+:root {
+  --ipad-top-offset: 0px;
+  --ipad-left-offset: 0px;
+}
+
+.app-shell {
+  padding-top: var(--ipad-top-offset);
+  background: var(--bg-elev);
+}
+body.kiosk .app-shell {
+  background: var(--bg);
+}
+.topbar {
+  padding-left: calc(16px + var(--ipad-left-offset));
+}
+.exit-kiosk-btn {
+  top: calc(12px + var(--ipad-top-offset));
+}
+
+.avatar-thumb-bg {
+  background-image:
+    linear-gradient(45deg, rgba(255,255,255,0.05) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(255,255,255,0.05) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(255,255,255,0.05) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(255,255,255,0.05) 75%);
+  background-size: 14px 14px;
+  background-position: 0 0, 0 7px, 7px -7px, -7px 0;
+}
+.avatar-thumb-bg img {
+  object-fit: contain !important;
+  padding: 6px;
 }

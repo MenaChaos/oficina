@@ -8,7 +8,8 @@
  */
 
 import { getTheme } from '../themes/themes.js';
-import { getRoomTemplate, BUILDING_FLOORPLAN } from '../config/rooms.js';
+import { getRoomTemplate, BUILDING_FLOORPLAN } from '../config/rooms.js?v=3.3';
+import { getAvatarTemplate } from '../config/avatars.js?v=3.3';
 
 const STATUS_COLORS = {
   VERDE: '#22c55e',
@@ -371,11 +372,11 @@ export class OfficeRenderer {
       }
 
       // Personaje vivo dentro de su cubículo/estancia
-      this.drawCozyCharacter(ctx, ax, ay - bob, charScale, agent.avatar, status, activity);
+      this.drawCozyCharacter(ctx, ax, ay, bob, charScale, agent, status, activity, true);
 
       // Placa compacta con nombre + semáforo + dato vivo justo debajo del personaje
       const shortInfo = this.getShortHeadline(agent, live);
-      const plateY = ay + 34 * charScale;
+      const plateY = ay + 24 * charScale;
       ctx.font = '800 11.2px -apple-system, BlinkMacSystemFont, sans-serif';
       const titleW = ctx.measureText(agent.name).width;
       ctx.font = '500 9.6px -apple-system, BlinkMacSystemFont, sans-serif';
@@ -422,7 +423,7 @@ export class OfficeRenderer {
         ctx.font = '700 10.5px -apple-system, sans-serif';
         const bText = this.truncateText(ctx, bubble.text, 175);
         const bw = ctx.measureText(bText).width + 18;
-        const by = ay - 46 * charScale;
+        const by = ay - 88 * charScale;
         ctx.fillStyle = '#fffdf8';
         ctx.beginPath();
         ctx.roundRect(ax - bw / 2, by, bw, 22, 9);
@@ -435,9 +436,9 @@ export class OfficeRenderer {
 
       // Hitbox generosa que cubre todo el cubículo + placa
       const hitW = Math.max(plateW, 130 * charScale);
-      const hitH = 128 * charScale;
+      const hitH = 136 * charScale;
       const hx = ax - hitW / 2;
-      const hy = ay - 56 * charScale;
+      const hy = ay - 82 * charScale;
       const sx = (hx - W / 2) * this.cam.zoom + W / 2 + this.cam.x;
       const sy = (hy - H / 2) * this.cam.zoom + H / 2 + this.cam.y;
       this.hitBoxes.push({
@@ -611,7 +612,7 @@ export class OfficeRenderer {
     const cx = x + w * anchor.x;
     const cy = y + h * anchor.y - bob;
     const charScale = Math.max(0.78, Math.min(1.18, w / 290));
-    this.drawCozyCharacter(ctx, cx, cy, charScale, agent.avatar, status, activity);
+    this.drawCozyCharacter(ctx, cx, cy + bob, bob, charScale, agent, status, activity, false);
 
     const pillText = status;
     ctx.font = '800 9.5px -apple-system, BlinkMacSystemFont, sans-serif';
@@ -665,7 +666,7 @@ export class OfficeRenderer {
       const bText = this.truncateText(ctx, bubble.text, w - 36);
       const bw = ctx.measureText(bText).width + 20;
       const bx = Math.max(x + 10, Math.min(x + w - bw - 10, cx - bw / 2));
-      const by = Math.max(y + 38, cy - 50 * charScale);
+      const by = Math.max(y + 38, cy - 84 * charScale);
       ctx.fillStyle = '#fffdf8';
       ctx.beginPath();
       ctx.roundRect(bx, by, bw, 24, 10);
@@ -699,37 +700,61 @@ export class OfficeRenderer {
     this.drawPoly(ctx, [{ x: cx, y: cy - s * 0.45 }, { x: cx + s, y: cy + s * 0.05 }, { x: cx + s, y: cy - s * 0.68 }, { x: cx, y: cy - s * 1.18 }], '#3a322c', 'rgba(0,0,0,0.2)', 1);
   }
 
-  drawCozyCharacter(ctx, cx, cy, scale, avatar, status, activity) {
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.scale(scale, scale);
+  drawCozyCharacter(ctx, footX, footY, bob, scale, agent, status, activity, isBuildingMode) {
+    const avatar = agent.avatar || 'robot';
+    const avTpl = getAvatarTemplate(avatar);
+    const sprite = this.assets ? this.assets.getAvatarSpriteForAgent(agent) : null;
+    const statusColor = STATUS_COLORS[status] || STATUS_COLORS.VERDE;
+    const isSelected = this.selectedAgentId === agent.id;
 
+    ctx.save();
+    ctx.translate(footX, footY);
+
+    // Anillo luminoso en el suelo estilo Cozy / Sims
+    const ringR = (isBuildingMode ? 24 : 26) * scale;
+    const pulse = 0.65 + Math.sin(this.t * (status === 'ROJO' || activity === 'working' ? 5.5 : 2.2)) * 0.35;
+
+    ctx.save();
     ctx.fillStyle = 'rgba(0, 0, 0, 0.44)';
     ctx.beginPath();
-    ctx.ellipse(0, 12, 15, 6, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 2 * scale, ringR * 0.85, ringR * 0.36, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    if (activity === 'working' || status === 'ROJO') {
-      ctx.strokeStyle = status === 'ROJO' ? '#ef4444' : '#38bdf8';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.ellipse(0, 12, 19 + Math.sin(this.t * 5) * 2.5, 8, 0, 0, Math.PI * 2);
-      ctx.stroke();
+    // Aro de estado suave en los pies
+    ctx.strokeStyle = isSelected ? '#fbf6ee' : statusColor;
+    ctx.globalAlpha = isSelected ? 0.92 : status === 'ROJO' ? 0.88 * pulse : 0.45 * pulse;
+    ctx.lineWidth = isSelected || status === 'ROJO' ? 2.2 : 1.4;
+    ctx.beginPath();
+    ctx.ellipse(0, 2 * scale, ringR, ringR * 0.44, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    if (sprite) {
+      // Dibujar sprite 3D Cozy Fantasía recortado con respiración suave y sombra
+      const baseH = (isBuildingMode ? 76 : 82) * scale * (avTpl.scaleBoost || 1);
+      const sw = sprite.width || sprite.naturalWidth || 100;
+      const sh = sprite.height || sprite.naturalHeight || 100;
+      const aspect = sw / sh;
+      const breathe = 1 + Math.sin(this.t * 2.4 + footX * 0.03) * 0.018;
+      const drawH = baseH * breathe;
+      const drawW = drawH * aspect;
+
+      ctx.save();
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.42)';
+      ctx.shadowBlur = 10;
+      ctx.shadowOffsetY = 4;
+      ctx.drawImage(sprite, -drawW / 2, -drawH + 4 * scale - bob, drawW, drawH);
+      ctx.restore();
+
+      ctx.restore();
+      return;
     }
 
-    const bodyColors = {
-      contador: '#3b82f6',
-      combustible: '#dc2626',
-      mecanico: '#d97706',
-      perro: '#9a5b25',
-      profesor: '#f1f5f9',
-      bateria: '#059669',
-      robot: '#7c3aed',
-      servidor: '#0891b2',
-      camara: '#64748b'
-    };
+    // Fallback Cozy estilizado mientras suben las imágenes a assets/avatars/
+    ctx.translate(0, -12 * scale - bob);
+    ctx.scale(scale, scale);
 
-    ctx.fillStyle = bodyColors[avatar] || '#f4a261';
+    ctx.fillStyle = avTpl.bodyColor || '#f4a261';
     ctx.strokeStyle = 'rgba(20, 16, 14, 0.85)';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -750,39 +775,26 @@ export class OfficeRenderer {
     ctx.fill();
 
     if (avatar === 'profesor') {
-      ctx.strokeStyle = '#0f172a';
-      ctx.lineWidth = 1.6;
-      ctx.fillStyle = 'rgba(255,255,255,0.75)';
-      ctx.fillRect(-7.5, -19.5, 6.2, 5.2);
-      ctx.fillRect(1.3, -19.5, 6.2, 5.2);
-      ctx.strokeRect(-7.5, -19.5, 6.2, 5.2);
-      ctx.strokeRect(1.3, -19.5, 6.2, 5.2);
-    } else if (avatar === 'perro') {
-      ctx.fillStyle = '#783f15';
+      ctx.fillStyle = '#7e22ce';
       ctx.beginPath();
-      ctx.roundRect(-13.5, -19, 4.5, 10, 2.5);
-      ctx.roundRect(9, -19, 4.5, 10, 2.5);
-      ctx.fill();
-      ctx.fillStyle = '#1f1a17';
+      ctx.moveTo(-12, -22); ctx.lineTo(12, -22); ctx.lineTo(0, -37); ctx.closePath();
+      ctx.fill(); ctx.stroke();
+    } else if (avatar === 'contador') {
+      ctx.fillStyle = '#2e7d32';
       ctx.beginPath();
-      ctx.arc(0, -12.5, 2.1, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.moveTo(-11, -22); ctx.lineTo(11, -22); ctx.lineTo(-2, -35); ctx.closePath();
+      ctx.fill(); ctx.stroke();
     } else if (avatar === 'mecanico') {
       ctx.fillStyle = '#b91c1c';
       ctx.beginPath();
       ctx.arc(0, -20, 10, Math.PI, 0);
       ctx.fill();
       ctx.fillRect(-10, -21, 16, 3);
-    } else if (avatar === 'robot') {
-      ctx.strokeStyle = '#38bdf8';
-      ctx.lineWidth = 2;
+    } else if (avatar === 'perro' || avatar === 'combustible') {
+      ctx.fillStyle = avatar === 'combustible' ? '#ea580c' : '#783f15';
       ctx.beginPath();
-      ctx.moveTo(0, -26.5);
-      ctx.lineTo(0, -33);
-      ctx.stroke();
-      ctx.fillStyle = '#38bdf8';
-      ctx.beginPath();
-      ctx.arc(0, -34, 2.5, 0, Math.PI * 2);
+      ctx.roundRect(-13.5, -19, 4.5, 10, 2.5);
+      ctx.roundRect(9, -19, 4.5, 10, 2.5);
       ctx.fill();
     }
 

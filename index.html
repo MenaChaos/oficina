@@ -7,7 +7,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black" />
   <meta name="apple-mobile-web-app-title" content="Oficina OS" />
   <title>MenaChaos OS — Oficina Virtual Cozy</title>
-  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./styles.css?v=3.3" />
 </head>
 <body>
   <div id="dim-overlay" class="dim-overlay" aria-hidden="true"></div>
@@ -185,6 +185,11 @@
             <h3>Galería de Salas Ilustradas (<code>assets/rooms/</code>)</h3>
             <p class="muted small">Sube las imágenes a la carpeta <code>assets/rooms/</code> de tu repo para que se carguen en todos tus dispositivos, o cárgalas aquí al instante para probarlas.</p>
             <div id="rooms-gallery" class="rooms-gallery"></div>
+
+            <hr class="divider" />
+            <h3>Personajes Cozy Fantasía (<code>assets/avatars/</code>)</h3>
+            <p class="muted small">Sube los personajes a <code>assets/avatars/</code> (el fondo verde o magenta se recorta solo a transparencia) o pruébalos aquí al instante.</p>
+            <div id="avatars-gallery" class="rooms-gallery"></div>
           </div>
 
           <div class="panel">
@@ -213,6 +218,30 @@
                 <button id="btn-test-ping" class="btn btn-secondary">Probar Ping</button>
               </div>
               <div id="conn-feedback" class="feedback-msg"></div>
+            </div>
+
+            <hr class="divider" />
+            <h3>Ajuste de Pantalla iPad (este dispositivo)</h3>
+            <p class="muted small">Si la barra superior del iPad o los 3 botones de ventana tapan el menú, ajústalo aquí al píxel (no afecta al PC).</p>
+            <div class="form-row-2">
+              <div>
+                <label class="field-label">Margen superior (Reloj/Batería)</label>
+                <select id="cfg-ipad-top" class="input">
+                  <option value="auto">Automático</option>
+                  <option value="0">0 px (Sin margen)</option>
+                  <option value="28">28 px (Compacto)</option>
+                  <option value="40">40 px (iPadOS completo)</option>
+                  <option value="52">52 px (Extra amplio)</option>
+                </select>
+              </div>
+              <div>
+                <label class="field-label">Margen botones ventana (🔴🟡🟢)</label>
+                <select id="cfg-ipad-left" class="input">
+                  <option value="auto">Automático (84 px en iPad)</option>
+                  <option value="0">0 px (Desactivado)</option>
+                  <option value="84">84 px (Activado)</option>
+                </select>
+              </div>
             </div>
 
             <hr class="divider" />
@@ -255,15 +284,15 @@
           <div>
             <label class="field-label">Personaje</label>
             <select id="af-avatar" class="input">
-              <option value="contador">💼 Contador / Finanzas</option>
-              <option value="combustible">⛽ Estación Combustible</option>
-              <option value="mecanico">🚗 Mecánico / Vehículo</option>
-              <option value="perro">🐶 Simurdiera / Social</option>
-              <option value="profesor">🧪 Profesor / Laboratorio</option>
-              <option value="bateria">🔋 Taller Baterías</option>
-              <option value="robot">🤖 Agente IA</option>
-              <option value="servidor">🖥️ Servidor / Script</option>
-              <option value="camara">📹 Vigilancia</option>
+              <option value="contador">🧝 Elfo Contador (Finanzas)</option>
+              <option value="combustible">🦊 Zorrito Viajero (Ruta/Combustible)</option>
+              <option value="mecanico">🔧 Gnomo Mecánico (Garage)</option>
+              <option value="perro">🐶 Perrito Gamer (Discord/Social)</option>
+              <option value="profesor">🧙 Mago Científico (Laboratorio)</option>
+              <option value="bateria">🔋 Artesano Energía (Baterías 12V)</option>
+              <option value="robot">🤖 Gólem / Bot IA</option>
+              <option value="servidor">🖥️ Guardián Servidor</option>
+              <option value="camara">🦉 Centinela (Alertas)</option>
             </select>
           </div>
           <div>
@@ -364,6 +393,6 @@
 
   <div id="toast-container" class="toast-container"></div>
 
-  <script type="module" src="./ui/app.js"></script>
+  <script type="module" src="./ui/app.js?v=3.3"></script>
 </body>
 </html>
