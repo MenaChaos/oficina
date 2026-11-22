@@ -972,3 +972,5 @@ body.kiosk .app-shell {
   align-items: flex-start;
   gap: 16px;
 }
+
+.pre-line { white-space: pre-line; }
