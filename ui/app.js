@@ -3,12 +3,12 @@
  * Conecta OfficeStore, RoomAssetManager, OfficeRenderer y BridgeAPI.
  */
 
-import { OfficeStore } from '../core/store.js?v=3.4';
-import { OfficeRenderer } from '../core/renderer.js?v=3.4';
-import { RoomAssetManager, compressImageFileToDataUrl } from '../core/assets.js?v=3.4';
+import { OfficeStore } from '../core/store.js?v=3.5';
+import { OfficeRenderer } from '../core/renderer.js?v=3.5';
+import { RoomAssetManager, compressImageFileToDataUrl } from '../core/assets.js?v=3.5';
 import { THEMES } from '../themes/themes.js';
-import { ROOM_TEMPLATES, BUILDING_FLOORPLAN, getRoomTemplate } from '../config/rooms.js?v=3.4';
-import { AVATAR_TEMPLATES } from '../config/avatars.js?v=3.4';
+import { ROOM_TEMPLATES, BUILDING_FLOORPLAN, getRoomTemplate } from '../config/rooms.js?v=3.5';
+import { AVATAR_TEMPLATES } from '../config/avatars.js?v=3.5';
 import { parseSteamHistoryLines } from '../core/api.js';
 
 const store = new OfficeStore();
@@ -493,26 +493,39 @@ function buildAgentDetailHTML(agent, live, compact = false) {
       <div class="kpi-box"><div class="kpi-label">Combust.</div><div class="kpi-val">${esc(dia.combustibleL)} L</div></div>
       <div class="kpi-box"><div class="kpi-label">Temp Máx</div><div class="kpi-val">${esc(uv.tempMaxC)}°C</div></div>
       <div class="kpi-box"><div class="kpi-label">Volt. Mín</div><div class="kpi-val">${esc(uv.voltajeMinV)} V</div></div>
-    </div>
     </div>`;
 
+    const detalleViaje = t.detalleUltimoViaje || uv.detalle || '';
+
     if (compact) {
+      if (detalleViaje) {
+        html += `<details class="collapsible-block">
+          <summary>🛣️ Detalle del Último Viaje</summary>
+          <div class="collapsible-content pre-line">${esc(detalleViaje)}</div>
+        </details>`;
+      }
       html += `<details class="collapsible-block">
         <summary>💡 Acción Recomendada</summary>
-        <div class="collapsible-content">${esc(t.accionRecomendada)}</div>
+        <div class="collapsible-content pre-line">${esc(t.accionRecomendada)}</div>
       </details>
       <details class="collapsible-block">
         <summary>📋 Diagnóstico Preventivo completo</summary>
-        <div class="collapsible-content">${esc(t.resumenEstado)}</div>
+        <div class="collapsible-content pre-line">${esc(t.resumenEstado)}</div>
       </details>
       <details class="collapsible-block">
         <summary>📈 Tendencia Histórica (3–6 meses)</summary>
-        <div class="collapsible-content">${esc(t.tendenciaHistorica)}</div>
+        <div class="collapsible-content pre-line">${esc(t.tendenciaHistorica)}</div>
       </details>`;
     } else {
-      html += `<div class="text-block"><h4>Acción Recomendada</h4>${esc(t.accionRecomendada)}</div>
-      <div class="text-block"><h4>Diagnóstico Preventivo</h4>${esc(t.resumenEstado)}</div>
-      <div class="text-block"><h4>Tendencia Histórica</h4>${esc(t.tendenciaHistorica)}</div>`;
+      if (detalleViaje) {
+        html += `<details class="collapsible-block">
+          <summary>🛣️ Detalle del Último Viaje</summary>
+          <div class="collapsible-content pre-line">${esc(detalleViaje)}</div>
+        </details>`;
+      }
+      html += `<div class="text-block pre-line"><h4>Acción Recomendada</h4>${esc(t.accionRecomendada)}</div>
+      <div class="text-block pre-line"><h4>Diagnóstico Preventivo</h4>${esc(t.resumenEstado)}</div>
+      <div class="text-block pre-line"><h4>Tendencia Histórica</h4>${esc(t.tendenciaHistorica)}</div>`;
     }
   }
 
