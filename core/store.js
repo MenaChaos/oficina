@@ -1,9 +1,11 @@
 /**
  * CAPA DE ESTADO Y PERSISTENCIA (core/store.js)
- * Gestiona oficinas, agentes, tema activo, credenciales locales y sincronización con Sheets.
+ * Mantiene las mismas llaves de localStorage de v2 para no pedir clave de nuevo
+ * y migra suavemente cualquier configuración previa de Config_Oficina.
  */
 
 import { DEFAULT_BRIDGE_URL, DEFAULT_CONFIG, DEMO_DATA, DEMO_ALERTS } from '../config/default-world.js';
+import { inferDefaultRoomStyle } from '../config/rooms.js';
 import { BridgeAPI } from './api.js';
 import { applyThemeCss } from '../themes/themes.js';
 
@@ -18,10 +20,10 @@ export class OfficeStore {
     this.api = new BridgeAPI(creds.url || DEFAULT_BRIDGE_URL, creds.secret || '');
 
     this.state = {
-      mode: creds.secret ? 'connecting' : 'locked', // locked | connecting | online | demo | error
+      mode: creds.secret ? 'connecting' : 'locked',
       bridgeUrl: creds.url || DEFAULT_BRIDGE_URL,
       apiSecret: creds.secret || '',
-      config: this.loadLocalConfig(),
+      config: this.migrateConfig(this.loadLocalConfig()),
       data: {},
       systemAlerts: [],
       selectedAgentId: null,
@@ -31,6 +33,22 @@ export class OfficeStore {
     };
 
     this.applyActiveTheme();
+  }
+
+  migrateConfig(cfg) {
+    const out = cfg && Array.isArray(cfg.offices) && cfg.offices.length > 0 ? cfg : structuredClone(DEFAULT_CONFIG);
+    if (!out.layoutMode) out.layoutMode = 'cozy-rooms';
+    if (!out.activeTheme || (out.version < 3 && out.activeTheme === 'cyber-studio')) {
+      out.activeTheme = 'cozy-warm';
+    }
+    out.offices.forEach((office) => {
+      (office.agents || []).forEach((agent) => {
+        if (!agent.roomStyle) {
+          agent.roomStyle = inferDefaultRoomStyle(agent);
+        }
+      });
+    });
+    return out;
   }
 
   subscribe(fn) {
@@ -43,11 +61,7 @@ export class OfficeStore {
   }
 
   loadLocalCreds() {
-    try {
-      return JSON.parse(localStorage.getItem(LS_KEY_CREDS) || '{}');
-    } catch {
-      return {};
-    }
+    try { return JSON.parse(localStorage.getItem(LS_KEY_CREDS) || '{}'); } catch { return {}; }
   }
 
   saveLocalCreds(url, secret) {
@@ -62,9 +76,7 @@ export class OfficeStore {
   loadLocalConfig() {
     try {
       const saved = JSON.parse(localStorage.getItem(LS_KEY_CONFIG) || 'null');
-      if (saved && Array.isArray(saved.offices) && saved.offices.length > 0) {
-        return saved;
-      }
+      if (saved && Array.isArray(saved.offices) && saved.offices.length > 0) return saved;
     } catch {}
     return structuredClone(DEFAULT_CONFIG);
   }
@@ -74,11 +86,7 @@ export class OfficeStore {
   }
 
   loadLocalPrefs() {
-    try {
-      return JSON.parse(localStorage.getItem(LS_KEY_PREFS) || '{"dim":false}');
-    } catch {
-      return { dim: false };
-    }
+    try { return JSON.parse(localStorage.getItem(LS_KEY_PREFS) || '{"dim":false}'); } catch { return { dim: false }; }
   }
 
   saveLocalPrefs() {
@@ -92,7 +100,12 @@ export class OfficeStore {
 
   getActiveThemeId() {
     const office = this.getActiveOffice();
-    return (office && office.themeOverride) || this.state.config.activeTheme || 'cyber-studio';
+    return (office && office.themeOverride) || this.state.config.activeTheme || 'cozy-warm';
+  }
+
+  getLayoutMode() {
+    const office = this.getActiveOffice();
+    return (office && office.layoutOverride) || this.state.config.layoutMode || 'cozy-rooms';
   }
 
   applyActiveTheme() {
@@ -110,7 +123,7 @@ export class OfficeStore {
     try {
       const res = await this.api.bootstrap(force);
       if (res.config && Array.isArray(res.config.offices) && res.config.offices.length > 0) {
-        this.state.config = res.config;
+        this.state.config = this.migrateConfig(res.config);
         this.saveLocalConfig();
       }
       this.state.data = res.data || {};
@@ -162,6 +175,7 @@ export class OfficeStore {
   }
 
   async persistConfigToCloud() {
+    this.state.config.version = 3;
     this.saveLocalConfig();
     if (this.state.mode === 'online' && this.api.isConfigured()) {
       await this.api.saveConfig(this.state.config);
@@ -184,7 +198,7 @@ export class OfficeStore {
       if (existing) {
         existing.name = name;
         existing.subtitle = subtitle;
-        existing.icon = icon || '🏢';
+        existing.icon = icon || '🏡';
       }
     } else {
       const newId = 'oficina-' + Date.now().toString(36);
@@ -192,7 +206,7 @@ export class OfficeStore {
         id: newId,
         name,
         subtitle: subtitle || '',
-        icon: icon || '🏢',
+        icon: icon || '🏡',
         themeOverride: null,
         agents: []
       });
@@ -244,7 +258,7 @@ export class OfficeStore {
     this.emit('config_changed');
   }
 
-  // ---- Gestión de Diseño / Temas ----
+  // ---- Diseño, Temas y Modo de Vista ----
   async setTheme(themeId, scope = 'global') {
     if (scope === 'office') {
       const office = this.getActiveOffice();
@@ -259,6 +273,12 @@ export class OfficeStore {
     this.emit('theme_changed', { themeId });
   }
 
+  async setLayoutMode(mode) {
+    this.state.config.layoutMode = mode === 'open-floor' ? 'open-floor' : 'cozy-rooms';
+    await this.persistConfigToCloud();
+    this.emit('theme_changed', { layoutMode: this.state.config.layoutMode });
+  }
+
   async setRefreshMinutes(mins) {
     this.state.config.refreshMinutes = Number(mins);
     await this.persistConfigToCloud();
@@ -269,7 +289,7 @@ export class OfficeStore {
     if (!newConfig || !Array.isArray(newConfig.offices) || newConfig.offices.length === 0) {
       throw new Error('JSON de configuración inválido.');
     }
-    this.state.config = newConfig;
+    this.state.config = this.migrateConfig(newConfig);
     this.applyActiveTheme();
     await this.persistConfigToCloud();
     this.emit('config_changed');

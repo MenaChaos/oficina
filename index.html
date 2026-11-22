@@ -6,18 +6,17 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Oficina OS" />
-  <title>MenaChaos OS — Oficina Virtual v2</title>
+  <title>MenaChaos OS — Oficina Virtual Cozy</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
-  <!-- Dimmer overlay para modo escritorio nocturno en iPad -->
   <div id="dim-overlay" class="dim-overlay" aria-hidden="true"></div>
 
   <!-- Modal de acceso rápido (solo clave la primera vez) -->
   <div id="auth-modal" class="modal-backdrop hidden">
     <div class="auth-card">
-      <div class="auth-logo">🏢</div>
-      <h1>MenaChaos OS <span class="badge-ver">v2</span></h1>
+      <div class="auth-logo">🏡</div>
+      <h1>MenaChaos OS <span class="badge-ver">Cozy</span></h1>
       <p class="auth-sub">Tu puente de Google Apps Script ya está precargado. Solo ingresa tu clave una vez y quedará guardada en este dispositivo.</p>
 
       <form id="auth-form" autocomplete="off">
@@ -45,7 +44,6 @@
 
   <!-- App Shell -->
   <div id="app-shell" class="app-shell">
-    <!-- Topbar -->
     <header id="topbar" class="topbar">
       <div class="topbar-left">
         <div class="brand">
@@ -59,13 +57,14 @@
       </div>
 
       <nav class="main-nav" aria-label="Vistas principales">
-        <button class="nav-btn active" data-view="office">🏢 Oficina</button>
+        <button class="nav-btn active" data-view="office">🏡 Oficina</button>
         <button class="nav-btn" data-view="dashboard">📊 Tablero</button>
         <button class="nav-btn" data-view="agents">🤖 Agentes</button>
         <button class="nav-btn" data-view="design">🎨 Diseño</button>
       </nav>
 
       <div class="topbar-right">
+        <button id="btn-layout-toggle" class="icon-btn" title="Cambiar entre Salas Cozy y Planta Abierta">🪟</button>
         <button id="alerts-pill" class="pill-btn hidden" title="Alertas de sistema (Gmail)">
           ⚠️ <span id="alerts-count">0</span>
         </button>
@@ -76,37 +75,31 @@
       </div>
     </header>
 
-    <!-- Botón flotante para salir de modo kiosco -->
     <button id="btn-exit-kiosk" class="exit-kiosk-btn hidden">Salir de Kiosco</button>
 
-    <!-- Contenedor de vistas -->
     <main class="main-stage">
-      <!-- VISTA 1: OFICINA ISOMÉTRICA -->
+      <!-- VISTA 1: SALAS COZY / OFICINA -->
       <section id="view-office" class="view active">
         <div class="canvas-wrapper">
           <canvas id="office-canvas"></canvas>
 
-          <!-- HUD superior izquierdo -->
           <div class="office-hud-top">
             <div class="hud-card">
               <div class="hud-title" id="hud-office-name">Sede Central</div>
-              <div class="hud-sub" id="hud-office-sub">Hogar, MG 6 y Bots</div>
+              <div class="hud-sub" id="hud-office-sub">Salas Cozy</div>
             </div>
             <div class="hud-pills" id="hud-summary-pills"></div>
           </div>
 
-          <!-- Controles de cámara -->
           <div class="camera-controls">
             <button id="cam-zoom-in" class="cam-btn" title="Acercar">+</button>
             <button id="cam-zoom-out" class="cam-btn" title="Alejar">−</button>
             <button id="cam-reset" class="cam-btn" title="Centrar vista">⌖</button>
           </div>
 
-          <!-- Barra rápida inferior de agentes -->
           <div id="agent-quickbar" class="agent-quickbar"></div>
         </div>
 
-        <!-- Panel Inspector lateral deslizable -->
         <aside id="inspector-drawer" class="inspector-drawer closed">
           <div class="drawer-header">
             <div>
@@ -114,7 +107,10 @@
               <h2 id="drawer-title">Agente</h2>
               <p id="drawer-role" class="muted"></p>
             </div>
-            <button id="drawer-close" class="icon-btn">✕</button>
+            <div class="btn-row">
+              <button id="drawer-edit-room" class="icon-btn" title="Personalizar habitación">🎨</button>
+              <button id="drawer-close" class="icon-btn">✕</button>
+            </div>
           </div>
           <div id="drawer-body" class="drawer-body"></div>
         </aside>
@@ -137,8 +133,8 @@
       <section id="view-agents" class="view scrollable-view">
         <div class="section-header">
           <div>
-            <h2>Oficinas y Agentes (Por Capas)</h2>
-            <p class="muted">Agrega, edita o elimina oficinas y agentes sin tocar el código base. Todo se guarda en <code>Config_Oficina</code>.</p>
+            <h2>Oficinas, Salas y Agentes</h2>
+            <p class="muted">Cada agente tiene su propia habitación personalizable. Todo se sincroniza en <code>Config_Oficina</code>.</p>
           </div>
           <div class="header-actions">
             <button id="btn-new-office" class="btn btn-secondary">+ Nueva Oficina</button>
@@ -162,24 +158,33 @@
         </div>
       </section>
 
-      <!-- VISTA 4: DISEÑO, TEMAS Y CONEXIÓN -->
+      <!-- VISTA 4: DISEÑO, SALAS COZY Y CONEXIÓN -->
       <section id="view-design" class="view scrollable-view">
         <div class="section-header">
           <div>
-            <h2>Diseño Visual y Conexión</h2>
-            <p class="muted">Cambia el estilo de tu oficina en vivo o gestiona tu enlace con el puente de Apps Script.</p>
+            <h2>Diseño Cozy, Salas y Conexión</h2>
+            <p class="muted">Cambia la ambientación, personaliza las ilustraciones de tus salas o gestiona tu puente.</p>
           </div>
         </div>
 
         <div class="design-grid">
           <div class="panel">
-            <h3>Temas Visuales de la Oficina</h3>
-            <p class="muted small">Al elegir un tema, la oficina se remodela en vivo. Puedes aplicarlo globalmente o solo a la oficina activa.</p>
+            <h3>Modo de Visualización y Temas</h3>
+            <div class="btn-row" style="margin-bottom: 14px;">
+              <button id="btn-mode-cozy" class="btn btn-secondary">🏡 Salas Cozy Separadas</button>
+              <button id="btn-mode-open" class="btn btn-secondary">🏢 Planta Abierta</button>
+            </div>
+
             <div class="theme-scope-toggle">
               <label><input type="radio" name="theme-scope" value="global" checked /> Tema global</label>
               <label><input type="radio" name="theme-scope" value="office" /> Solo esta oficina</label>
             </div>
             <div id="themes-grid" class="themes-grid"></div>
+
+            <hr class="divider" />
+            <h3>Galería de Salas Ilustradas (<code>assets/rooms/</code>)</h3>
+            <p class="muted small">Sube las imágenes a la carpeta <code>assets/rooms/</code> de tu repo para que se carguen en todos tus dispositivos, o cárgalas aquí al instante para probarlas.</p>
+            <div id="rooms-gallery" class="rooms-gallery"></div>
           </div>
 
           <div class="panel">
@@ -212,7 +217,6 @@
 
             <hr class="divider" />
             <h3>Respaldo de Configuración (JSON)</h3>
-            <p class="muted small">Exporta o importa tus oficinas y agentes como archivo JSON portátil.</p>
             <div class="btn-row">
               <button id="btn-export-json" class="btn btn-secondary">⬇️ Exportar JSON</button>
               <label class="btn btn-secondary file-btn">
@@ -227,7 +231,7 @@
     </main>
   </div>
 
-  <!-- Modal CRUD de Agente -->
+  <!-- Modal CRUD de Agente (incluye personalización de su Habitación Cozy) -->
   <div id="agent-modal" class="modal-backdrop hidden">
     <div class="modal-card">
       <div class="modal-header">
@@ -239,17 +243,17 @@
         <div class="form-row-2">
           <div>
             <label class="field-label">Nombre del agente</label>
-            <input id="af-name" class="input" placeholder="Ej: Monitor Voltacel" required />
+            <input id="af-name" class="input" placeholder="Ej: Monitor MG 6" required />
           </div>
           <div>
             <label class="field-label">Rol / Subtítulo</label>
-            <input id="af-role" class="input" placeholder="Ej: Ventas Mercado Libre" required />
+            <input id="af-role" class="input" placeholder="Ej: Mecánico OBD-II + IA" required />
           </div>
         </div>
 
         <div class="form-row-3">
           <div>
-            <label class="field-label">Avatar / Estación</label>
+            <label class="field-label">Personaje</label>
             <select id="af-avatar" class="input">
               <option value="contador">💼 Contador / Finanzas</option>
               <option value="combustible">⛽ Estación Combustible</option>
@@ -257,21 +261,14 @@
               <option value="perro">🐶 Simurdiera / Social</option>
               <option value="profesor">🧪 Profesor / Laboratorio</option>
               <option value="bateria">🔋 Taller Baterías</option>
-              <option value="robot">🤖 Agente IA Genérico</option>
+              <option value="robot">🤖 Agente IA</option>
               <option value="servidor">🖥️ Servidor / Script</option>
-              <option value="camara">📹 Vigilancia / Cámara</option>
+              <option value="camara">📹 Vigilancia</option>
             </select>
           </div>
           <div>
-            <label class="field-label">Tipo de Conector (Adaptador)</label>
-            <select id="af-adapter" class="input">
-              <option value="github_action">GitHub Actions (Repo + Archivo)</option>
-              <option value="google_sheet">Google Sheet genérico</option>
-              <option value="webhook_json">Webhook / Endpoint JSON</option>
-              <option value="servicios_hogar">Servicios Básicos Hogar</option>
-              <option value="combustible_copec">Control COPEC</option>
-              <option value="mg6_mecanico">Monitor Vehículo OBD-II</option>
-            </select>
+            <label class="field-label">Habitación Cozy</label>
+            <select id="af-room-style" class="input"></select>
           </div>
           <div>
             <label class="field-label">Estado</label>
@@ -282,7 +279,29 @@
           </div>
         </div>
 
-        <!-- Campos dinámicos según adaptador -->
+        <div class="form-row-2">
+          <div>
+            <label class="field-label">Imagen personalizada de sala (URL opcional)</label>
+            <input id="af-room-image" class="input" placeholder="Vacío = usa la habitación elegida" />
+          </div>
+          <div>
+            <label class="field-label">Color acento de esta sala</label>
+            <input id="af-room-accent" type="color" class="input" style="height:39px;padding:4px;" value="#f4a261" />
+          </div>
+        </div>
+
+        <div>
+          <label class="field-label">Tipo de Conector (Adaptador)</label>
+          <select id="af-adapter" class="input">
+            <option value="github_action">GitHub Actions (Repo + Archivo)</option>
+            <option value="google_sheet">Google Sheet genérico</option>
+            <option value="webhook_json">Webhook / Endpoint JSON</option>
+            <option value="servicios_hogar">Servicios Básicos Hogar</option>
+            <option value="combustible_copec">Control COPEC</option>
+            <option value="mg6_mecanico">Monitor Vehículo OBD-II</option>
+          </select>
+        </div>
+
         <div id="af-dynamic-fields" class="dynamic-fields-box"></div>
 
         <div id="af-test-result" class="feedback-msg"></div>
@@ -343,7 +362,6 @@
     </div>
   </div>
 
-  <!-- Toast notifications -->
   <div id="toast-container" class="toast-container"></div>
 
   <script type="module" src="./ui/app.js"></script>

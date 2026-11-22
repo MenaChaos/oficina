@@ -1,7 +1,6 @@
 /**
  * CAPA DE CONEXIÓN / API (core/api.js)
- * Habla directamente con backend/Code.gs en Google Apps Script.
- * Usa POST con Content-Type text/plain para evitar bloqueos CORS en GitHub Pages + Safari iPad.
+ * Habla directamente con backend/Code.gs en Google Apps Script sin modificarlo.
  */
 
 export class BridgeAPI {
@@ -53,42 +52,18 @@ export class BridgeAPI {
     return json;
   }
 
-  ping() {
-    return this.get('ping');
-  }
-
-  bootstrap(force = false) {
-    return this.get('bootstrap', force ? { force: '1' } : {});
-  }
-
-  sync(force = false) {
-    return this.get('sync', force ? { force: '1' } : {});
-  }
-
-  saveConfig(config) {
-    return this.post('save_config', { config });
-  }
-
-  markBillStatus(tabName, status, sheetId) {
-    return this.post('mark_bill_status', { tabName, status, sheetId });
-  }
-
-  markFuelReimbursed(rowNumber, value = true, sheetId) {
-    return this.post('mark_fuel_reimbursed', { rowNumber, value, sheetId });
-  }
-
+  ping() { return this.get('ping'); }
+  bootstrap(force = false) { return this.get('bootstrap', force ? { force: '1' } : {}); }
+  sync(force = false) { return this.get('sync', force ? { force: '1' } : {}); }
+  saveConfig(config) { return this.post('save_config', { config }); }
+  markBillStatus(tabName, status, sheetId) { return this.post('mark_bill_status', { tabName, status, sheetId }); }
+  markFuelReimbursed(rowNumber, value = true, sheetId) { return this.post('mark_fuel_reimbursed', { rowNumber, value, sheetId }); }
   triggerWorkflow({ owner, repo, workflowId, branch = 'main', inputs = {} }) {
     return this.post('trigger_workflow', { owner, repo, workflowId, branch, inputs });
   }
-
-  testAgent(agent) {
-    return this.post('test_agent', { agent });
-  }
+  testAgent(agent) { return this.post('test_agent', { agent }); }
 }
 
-/**
- * Parsea líneas "AppID,YYYY-MM-DD" de historial.txt en enlaces y portadas oficiales de Steam.
- */
 export function parseSteamHistoryLines(lines = []) {
   return lines
     .map((line) => {

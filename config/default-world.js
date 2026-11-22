@@ -1,23 +1,24 @@
 /**
  * CAPA DE CONFIGURACIÓN INICIAL (config/default-world.js)
- * - La URL del puente queda precargada para que solo debas ingresar tu clave una vez.
- * - Nunca guardamos la API_SECRET aquí para mantener seguro el repositorio público.
+ * - Compatible 100% con el backend Code.gs ya desplegado.
+ * - La URL del puente queda precargada; la API_SECRET se guarda solo en el dispositivo.
  */
 
 export const DEFAULT_BRIDGE_URL =
   'https://script.google.com/macros/s/AKfycbxGwL07VBxMui-RSbn8DbsGqdpEvivxRtdDayyuAiigqqJwKzBetQamVKodhEyzXwcFHQ/exec';
 
 export const DEFAULT_CONFIG = {
-  version: 2,
+  version: 3,
   activeOfficeId: 'hq-principal',
-  activeTheme: 'cyber-studio',
+  activeTheme: 'cozy-warm',
+  layoutMode: 'cozy-rooms', // 'cozy-rooms' | 'open-floor'
   refreshMinutes: 5,
   offices: [
     {
       id: 'hq-principal',
       name: 'Sede Central',
-      subtitle: 'Hogar, MG 6 y Bots',
-      icon: '🏢',
+      subtitle: 'Salas Cozy · Hogar, MG 6 y Bots',
+      icon: '🏡',
       themeOverride: null,
       agents: [
         {
@@ -25,6 +26,7 @@ export const DEFAULT_CONFIG = {
           name: 'Cuentas Hogar',
           role: 'Finanzas y Servicios Básicos',
           avatar: 'contador',
+          roomStyle: 'estudio-madera',
           deskSlot: 0,
           enabled: true,
           adapter: 'servicios_hogar',
@@ -44,6 +46,7 @@ export const DEFAULT_CONFIG = {
           name: 'Control COPEC',
           role: 'Boletas y Reembolsos',
           avatar: 'combustible',
+          roomStyle: 'oficina-ruta',
           deskSlot: 1,
           enabled: true,
           adapter: 'combustible_copec',
@@ -58,6 +61,7 @@ export const DEFAULT_CONFIG = {
           name: 'Monitor MG 6',
           role: 'Mecánico OBD-II + IA',
           avatar: 'mecanico',
+          roomStyle: 'garage-cozy',
           deskSlot: 2,
           enabled: true,
           adapter: 'mg6_mecanico',
@@ -76,6 +80,7 @@ export const DEFAULT_CONFIG = {
           name: 'Simurdiera',
           role: 'Clima y Convocatoria Discord',
           avatar: 'perro',
+          roomStyle: 'living-gamer',
           deskSlot: 3,
           enabled: true,
           adapter: 'github_action',
@@ -92,6 +97,7 @@ export const DEFAULT_CONFIG = {
           name: 'Prof. Farnsworth',
           role: 'Radar de Ofertas Steam',
           avatar: 'profesor',
+          roomStyle: 'lab-retro',
           deskSlot: 4,
           enabled: true,
           adapter: 'github_action',
@@ -110,9 +116,6 @@ export const DEFAULT_CONFIG = {
   ]
 };
 
-/**
- * Snapshot realista para Modo Demo offline (refleja tu estado real del 21-nov-2026).
- */
 export const DEMO_DATA = {
   'cuentas-hogar': {
     agentId: 'cuentas-hogar',

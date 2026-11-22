@@ -1,28 +1,14 @@
-# MenaChaos OS — Oficina Virtual v2 (Modular por Capas)
+# MenaChaos OS v3 — Salas Cozy Ilustradas (Híbrido)
 
-Oficina virtual isométrica 2.5D conectada en vivo a tus hojas de Google Sheets, repositorios de GitHub (públicos y privados) y alertas de Gmail, optimizada para quedar abierta en tu **iPad Air M3** o navegador de escritorio.
+Actualización visual por capas 100% compatible con tu puente `backend/Code.gs` y tu clave ya guardada en el navegador.
 
-## Estructura por capas
+## Cómo actualizar sin romper nada
 
-```text
-menachaos-oficina-os-v2/
-├── index.html                 # Cascarón principal y vistas
-├── styles.css                 # Diseño responsive y variables de tema
-├── config/
-│   └── default-world.js       # URL precargada del puente y tus 5 agentes base
-├── themes/
-│   └── themes.js              # 4 diseños intercambiables (Cyber, Planet Express, Taller, Diurno)
-├── core/
-│   ├── api.js                 # Cliente HTTP hacia tu puente Google Apps Script
-│   ├── store.js               # Estado global, CRUD de oficinas/agentes y sync con Config_Oficina
-│   └── renderer.js            # Motor isométrico 2.5D en Canvas Retina (60fps)
-└── ui/
-    └── app.js                 # Controlador de vistas, inspector, gestor y conexión
-```
-
-## Cómo publicarlo en GitHub Pages en 3 pasos
-
-1. Crea un repositorio público nuevo en GitHub (por ejemplo `oficina-os`).
-2. Sube el contenido de esta carpeta (asegúrate de que `index.html` quede en la raíz del repositorio).
-3. Ve a **Settings → Pages → Build and deployment → Branch: `main` / `/ (root)` → Save**.
-4. Abre la URL de GitHub Pages en tu iPad (Safari) o PC, escribe tu `API_SECRET` una única vez y toca **Compartir → Añadir a pantalla de inicio** en el iPad para usarla a pantalla completa.
+1. Reemplaza los archivos de tu repositorio `oficina` por el contenido de `menachaos-oficina-os-v3/`.
+2. Guarda las 5 ilustraciones Cozy generadas dentro de la carpeta `assets/rooms/` con estos nombres exactos:
+   - `garage-cozy.jpg` (Monitor MG 6)
+   - `estudio-madera.jpg` (Cuentas Hogar)
+   - `oficina-ruta.jpg` (Control COPEC)
+   - `living-gamer.jpg` (Simurdiera)
+   - `lab-retro.jpg` (Prof. Farnsworth)
+3. Sube los cambios a GitHub (`main`). En ~1 minuto tu enlace `https://menachaos.github.io/oficina/` cargará las 5 habitaciones independientes en estilo Cozy sin pedirte reconfigurar Apps Script.

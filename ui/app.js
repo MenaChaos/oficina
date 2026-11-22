@@ -1,18 +1,20 @@
 /**
- * CAPA DE INTERFAZ Y CONTROLADOR PRINCIPAL (ui/app.js)
- * Conecta OfficeStore, OfficeRenderer y BridgeAPI en 4 vistas limpias.
+ * CAPA DE INTERFAZ Y CONTROLADOR PRINCIPAL v3 (ui/app.js)
+ * Conecta OfficeStore, RoomAssetManager, OfficeRenderer y BridgeAPI.
  */
 
 import { OfficeStore } from '../core/store.js';
 import { OfficeRenderer } from '../core/renderer.js';
+import { RoomAssetManager, compressImageFileToDataUrl } from '../core/assets.js';
 import { THEMES } from '../themes/themes.js';
+import { ROOM_TEMPLATES, getRoomTemplate } from '../config/rooms.js';
 import { parseSteamHistoryLines } from '../core/api.js';
 
 const store = new OfficeStore();
+let assetManager = null;
 let renderer = null;
 let refreshTimer = null;
 
-// ---- Helpers DOM ----
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
@@ -32,21 +34,24 @@ function toast(msg, isError = false) {
   setTimeout(() => el.remove(), 3600);
 }
 
-// ---- Inicialización ----
 function init() {
-  renderer = new OfficeRenderer($('#office-canvas'), (agentId) => {
+  assetManager = new RoomAssetManager(() => {
+    renderRoomsGallery();
+  });
+
+  renderer = new OfficeRenderer($('#office-canvas'), assetManager, (agentId) => {
     store.state.selectedAgentId = agentId;
     renderQuickbar();
     openInspector(agentId);
   });
 
+  populateRoomStyleSelect();
   bindGlobalEvents();
   bindAuthModal();
   bindAgentCrudModal();
   bindOfficeCrudModal();
   bindDesignView();
 
-  // Restaurar brillo atenuado si estaba activo
   if (store.state.prefs.dim) {
     $('#dim-overlay').classList.add('active');
     $('#btn-dim').classList.add('active');
@@ -58,13 +63,12 @@ function init() {
 
   renderAll();
 
-  // Si ya hay clave guardada en localStorage, conectar automáticamente al abrir
   if (store.state.apiSecret) {
     store
       .connectAndBootstrap()
       .then(() => {
         scheduleAutoRefresh();
-        toast('Oficina sincronizada en vivo');
+        toast('Oficina Cozy sincronizada en vivo');
       })
       .catch((err) => {
         showAuthModal('No se pudo conectar automáticamente: ' + err.message);
@@ -72,6 +76,12 @@ function init() {
   } else {
     showAuthModal();
   }
+}
+
+function populateRoomStyleSelect() {
+  $('#af-room-style').innerHTML = Object.values(ROOM_TEMPLATES)
+    .map((r) => `<option value="${r.id}">${r.icon} ${r.name}</option>`)
+    .join('');
 }
 
 function scheduleAutoRefresh() {
@@ -84,7 +94,6 @@ function scheduleAutoRefresh() {
   }
 }
 
-// ---- Navegación y Topbar ----
 function bindGlobalEvents() {
   $$('.nav-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -93,9 +102,7 @@ function bindGlobalEvents() {
       const target = btn.dataset.view;
       $$('.view').forEach((v) => v.classList.remove('active'));
       $('#view-' + target).classList.add('active');
-      if (target === 'office') {
-        setTimeout(() => renderer.resize(), 40);
-      }
+      if (target === 'office') setTimeout(() => renderer.resize(), 40);
     });
   });
 
@@ -103,6 +110,12 @@ function bindGlobalEvents() {
     store.setActiveOffice(e.target.value);
     closeInspector();
     renderer.resetCamera();
+  });
+
+  $('#btn-layout-toggle').addEventListener('click', async () => {
+    const next = store.getLayoutMode() === 'cozy-rooms' ? 'open-floor' : 'cozy-rooms';
+    await store.setLayoutMode(next);
+    toast(next === 'cozy-rooms' ? 'Vista: Salas Cozy separadas' : 'Vista: Planta abierta');
   });
 
   $('#btn-sync').addEventListener('click', async () => {
@@ -146,20 +159,22 @@ function bindGlobalEvents() {
   $('#cam-reset').addEventListener('click', () => renderer.resetCamera());
   $('#drawer-close').addEventListener('click', closeInspector);
 
+  $('#drawer-edit-room').addEventListener('click', () => {
+    if (!store.state.selectedAgentId) return;
+    const agent = store.getActiveOffice().agents.find((a) => a.id === store.state.selectedAgentId);
+    if (agent) openAgentModal(agent);
+  });
+
   $('#alerts-pill').addEventListener('click', () => {
     const body = $('#alerts-modal-body');
     const alerts = store.state.systemAlerts || [];
     body.innerHTML = alerts.length
       ? alerts
           .map(
-            (a) => `
-          <div class="mini-row">
-            <div>
-              <strong>${esc(a.source)}</strong>
-              <div class="muted small">${esc(a.subject)}</div>
-            </div>
-            <span class="muted small">${esc(a.date)}</span>
-          </div>`
+            (a) => `<div class="mini-row">
+              <div><strong>${esc(a.source)}</strong><div class="muted small">${esc(a.subject)}</div></div>
+              <span class="muted small">${esc(a.date)}</span>
+            </div>`
           )
           .join('')
       : '<p class="muted">Sin alertas recientes.</p>';
@@ -168,7 +183,6 @@ function bindGlobalEvents() {
   $('#alerts-modal-close').addEventListener('click', () => $('#alerts-modal').classList.add('hidden'));
 }
 
-// ---- Auth Modal (1 paso: solo clave) ----
 function showAuthModal(errMsg = '') {
   $('#auth-url-input').value = store.state.bridgeUrl;
   $('#auth-secret-input').value = store.state.apiSecret || '';
@@ -186,14 +200,12 @@ function bindAuthModal() {
   $('#auth-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const btn = $('#auth-submit-btn');
-    const url = $('#auth-url-input').value.trim();
-    const secret = $('#auth-secret-input').value.trim();
     btn.disabled = true;
     btn.textContent = 'Conectando con Google & GitHub...';
     $('#auth-error').classList.add('hidden');
 
     try {
-      await store.connectAndBootstrap(url, secret, true);
+      await store.connectAndBootstrap($('#auth-url-input').value.trim(), $('#auth-secret-input').value.trim(), true);
       $('#auth-modal').classList.add('hidden');
       scheduleAutoRefresh();
       toast('¡Conectado a tus automatizaciones reales!');
@@ -213,12 +225,11 @@ function bindAuthModal() {
   });
 }
 
-// ---- Renderizado General ----
 function renderAll(triggerRemodel = false) {
   const office = store.getActiveOffice();
   const { mode, lastSync, systemAlerts, isSyncing } = store.state;
+  const layoutMode = store.getLayoutMode();
 
-  // Conexión & Topbar
   const dot = $('#conn-dot');
   dot.className = 'brand-dot ' + (mode === 'online' ? 'online' : mode === 'demo' ? 'demo' : 'error');
 
@@ -229,7 +240,6 @@ function renderAll(triggerRemodel = false) {
       lastSync.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })
     : 'Sin sincronizar';
 
-  // Alertas Gmail
   if (systemAlerts && systemAlerts.length > 0) {
     $('#alerts-pill').classList.remove('hidden');
     $('#alerts-count').textContent = systemAlerts.length;
@@ -237,24 +247,16 @@ function renderAll(triggerRemodel = false) {
     $('#alerts-pill').classList.add('hidden');
   }
 
-  // Selector de oficinas
-  const sel = $('#office-selector');
-  sel.innerHTML = store.state.config.offices
+  $('#office-selector').innerHTML = store.state.config.offices
     .map(
-      (o) =>
-        `<option value="${esc(o.id)}" ${o.id === office.id ? 'selected' : ''}>${esc(o.icon || '🏢')} ${esc(
-          o.name
-        )}</option>`
+      (o) => `<option value="${esc(o.id)}" ${o.id === office.id ? 'selected' : ''}>${esc(o.icon || '🏡')} ${esc(o.name)}</option>`
     )
     .join('');
 
-  // HUD Oficina
-  $('#hud-office-name').textContent = `${office.icon || '🏢'} ${office.name}`;
-  $('#hud-office-sub').textContent = office.subtitle || `${office.agents.length} agentes`;
+  $('#hud-office-name').textContent = `${office.icon || '🏡'} ${office.name}`;
+  $('#hud-office-sub').textContent = office.subtitle || `${office.agents.length} salas activas`;
 
-  let rojos = 0;
-  let amarillos = 0;
-  let verdes = 0;
+  let rojos = 0, amarillos = 0, verdes = 0;
   office.agents.forEach((a) => {
     const st = a.enabled === false ? 'PAUSADO' : (store.state.data[a.id] || {}).status || 'VERDE';
     if (st === 'ROJO') rojos++;
@@ -268,11 +270,11 @@ function renderAll(triggerRemodel = false) {
     ${rojos ? `<span class="hud-pill red">● ${rojos} Urgente</span>` : ''}
   `;
 
-  // Escena isométrica
   renderer.setScene({
     agents: office.agents,
     agentData: store.state.data,
     themeId: store.getActiveThemeId(),
+    layoutMode,
     selectedAgentId: store.state.selectedAgentId,
     triggerRemodel
   });
@@ -295,10 +297,11 @@ function renderQuickbar() {
   $('#agent-quickbar').innerHTML = office.agents
     .map((a) => {
       const st = a.enabled === false ? 'PAUSADO' : (store.state.data[a.id] || {}).status || 'VERDE';
+      const tpl = getRoomTemplate(a.roomStyle, a);
       const sel = store.state.selectedAgentId === a.id ? 'selected' : '';
       return `<button class="quick-chip ${sel}" data-agent="${esc(a.id)}">
         <span class="chip-dot" style="background:${colors[st] || '#22c55e'}"></span>
-        ${esc(a.name)}
+        ${tpl.icon} ${esc(a.name)}
       </button>`;
     })
     .join('');
@@ -312,13 +315,13 @@ function renderQuickbar() {
         agents: office.agents,
         agentData: store.state.data,
         themeId: store.getActiveThemeId(),
+        layoutMode: store.getLayoutMode(),
         selectedAgentId: btn.dataset.agent
       });
     });
   });
 }
 
-// ---- Inspector de Agente (Detalle + Acciones Reales) ----
 function openInspector(agentId, openDrawer = true) {
   const office = store.getActiveOffice();
   const agent = office.agents.find((a) => a.id === agentId);
@@ -326,19 +329,17 @@ function openInspector(agentId, openDrawer = true) {
 
   const live = store.state.data[agent.id] || {};
   const status = agent.enabled === false ? 'PAUSADO' : live.status || 'VERDE';
+  const tpl = getRoomTemplate(agent.roomStyle, agent);
 
   const badge = $('#drawer-badge');
   badge.textContent = status;
   badge.className = 'status-badge ' + status;
   $('#drawer-title').textContent = agent.name;
-  $('#drawer-role').textContent = `${agent.role} · Adaptador: ${agent.adapter}`;
+  $('#drawer-role').textContent = `${tpl.icon} ${tpl.name} · ${agent.role}`;
   $('#drawer-body').innerHTML = buildAgentDetailHTML(agent, live);
 
   bindAgentDetailActions($('#drawer-body'), agent);
-
-  if (openDrawer) {
-    $('#inspector-drawer').classList.remove('closed');
-  }
+  if (openDrawer) $('#inspector-drawer').classList.remove('closed');
 }
 
 function closeInspector() {
@@ -357,7 +358,6 @@ function buildAgentDetailHTML(agent, live) {
 
   let html = `<div class="text-block"><h4>Estado actual</h4>${esc(live.headline || 'Operativo')}</div>`;
 
-  // 1. Servicios Hogar
   if (agent.adapter === 'servicios_hogar' && Array.isArray(live.items)) {
     html += `<div class="bills-grid">` +
       live.items
@@ -377,7 +377,6 @@ function buildAgentDetailHTML(agent, live) {
       `</div>`;
   }
 
-  // 2. Control COPEC
   if (agent.adapter === 'combustible_copec') {
     const lr = live.lastReceipt;
     const m = live.metrics || {};
@@ -410,7 +409,6 @@ function buildAgentDetailHTML(agent, live) {
     }
   }
 
-  // 3. Monitor MG 6
   if (agent.adapter === 'mg6_mecanico' && live.telemetry) {
     const t = live.telemetry;
     const uv = t.ultimoViaje || {};
@@ -426,7 +424,6 @@ function buildAgentDetailHTML(agent, live) {
     <div class="text-block"><h4>Tendencia Histórica</h4>${esc(t.tendenciaHistorica)}</div>`;
   }
 
-  // 4. GitHub Actions (MG6, Simurdiera, Prof. Farnsworth y futuros bots)
   if (live.github && live.github.repo) {
     const gh = live.github;
     html += `<div class="mini-row">
@@ -438,7 +435,6 @@ function buildAgentDetailHTML(agent, live) {
     </div>`;
   }
 
-  // 5. Historial Steam (Prof. Farnsworth) o archivo leído de GitHub
   if (live.filePreview && Array.isArray(live.filePreview.recentLines)) {
     const steamGames = parseSteamHistoryLines(live.filePreview.recentLines);
     if (steamGames.length > 0) {
@@ -455,13 +451,10 @@ function buildAgentDetailHTML(agent, live) {
           .join('') +
         `</div></div>`;
     } else {
-      html += `<div class="text-block"><h4>${esc(live.filePreview.fileName)}</h4>${live.filePreview.recentLines
-        .map(esc)
-        .join('<br/>')}</div>`;
+      html += `<div class="text-block"><h4>${esc(live.filePreview.fileName)}</h4>${live.filePreview.recentLines.map(esc).join('<br/>')}</div>`;
     }
   }
 
-  // 6. Adaptador Google Sheet genérico o Webhook JSON
   if (live.kv || live.lastRow || live.raw) {
     const obj = live.kv || live.lastRow || live.raw;
     html += `<div class="text-block"><h4>Datos recibidos</h4><pre style="margin:0;white-space:pre-wrap;font-size:0.78rem">${esc(
@@ -485,11 +478,7 @@ function bindAgentDetailActions(container, agent) {
           await store.syncData(true);
         } else {
           const item = (store.state.data[agent.id]?.items || []).find((x) => x.tabName === tabName);
-          if (item) {
-            item.status = nextStatus;
-            item.isPaid = nextStatus === 'Pagado';
-            item.isOverdue = false;
-          }
+          if (item) { item.status = nextStatus; item.isPaid = nextStatus === 'Pagado'; item.isOverdue = false; }
           renderer.say(agent.id, `Demo: ${tabName} → ${nextStatus}`);
           renderAll();
         }
@@ -549,10 +538,9 @@ function bindAgentDetailActions(container, agent) {
   });
 }
 
-// ---- Vista 2: Tablero Widgets ----
 function renderDashboard() {
   const office = store.getActiveOffice();
-  $('#dash-subtitle').textContent = `${office.icon || '🏢'} ${office.name} — ${office.agents.length} agentes configurados`;
+  $('#dash-subtitle').textContent = `${office.icon || '🏡'} ${office.name} — ${office.agents.length} agentes configurados`;
 
   const alertsBox = $('#dashboard-alerts-box');
   if (store.state.systemAlerts.length > 0) {
@@ -569,11 +557,12 @@ function renderDashboard() {
     .map((agent) => {
       const live = store.state.data[agent.id] || {};
       const status = agent.enabled === false ? 'PAUSADO' : live.status || 'VERDE';
+      const tpl = getRoomTemplate(agent.roomStyle, agent);
       return `<article class="widget-card" data-widget-agent="${esc(agent.id)}">
         <div class="widget-head">
           <div>
-            <h3>${esc(agent.name)}</h3>
-            <div class="muted">${esc(agent.role)}</div>
+            <h3>${tpl.icon} ${esc(agent.name)}</h3>
+            <div class="muted">${esc(tpl.name)} · ${esc(agent.role)}</div>
           </div>
           <span class="status-badge ${status}">${status}</span>
         </div>
@@ -588,24 +577,21 @@ function renderDashboard() {
   });
 }
 
-// ---- Vista 3: Gestor de Oficinas y Agentes ----
 function renderManager() {
   const offices = store.state.config.offices;
   const active = store.getActiveOffice();
   $('#mgr-office-name').textContent = active.name;
-  $('#mgr-agent-count').textContent = `${active.agents.length} agente(s)`;
+  $('#mgr-agent-count').textContent = `${active.agents.length} sala(s)`;
 
   $('#offices-list').innerHTML = offices
     .map(
       (o) => `<div class="entity-item ${o.id === active.id ? 'active-office' : ''}">
         <div class="entity-info">
-          <div class="entity-title">${esc(o.icon || '🏢')} ${esc(o.name)}</div>
+          <div class="entity-title">${esc(o.icon || '🏡')} ${esc(o.name)}</div>
           <div class="entity-meta">${esc(o.subtitle || 'Sin descripción')} · ${o.agents.length} agente(s)</div>
         </div>
         <div class="entity-actions">
-          <button class="btn btn-sm btn-secondary" data-use-office="${esc(o.id)}">${
-        o.id === active.id ? 'Activa' : 'Abrir'
-      }</button>
+          <button class="btn btn-sm btn-secondary" data-use-office="${esc(o.id)}">${o.id === active.id ? 'Activa' : 'Abrir'}</button>
           <button class="btn btn-sm btn-ghost" data-edit-office="${esc(o.id)}">✏️</button>
           <button class="btn btn-sm btn-danger-ghost" data-del-office="${esc(o.id)}">🗑️</button>
         </div>
@@ -615,18 +601,19 @@ function renderManager() {
 
   $('#agents-list').innerHTML = active.agents.length
     ? active.agents
-        .map(
-          (a) => `<div class="entity-item">
+        .map((a) => {
+          const tpl = getRoomTemplate(a.roomStyle, a);
+          return `<div class="entity-item">
             <div class="entity-info">
-              <div class="entity-title">${esc(a.name)} ${a.enabled === false ? '<span class="muted small">(Pausado)</span>' : ''}</div>
-              <div class="entity-meta">${esc(a.role)} · <code>${esc(a.adapter)}</code></div>
+              <div class="entity-title">${tpl.icon} ${esc(a.name)} ${a.enabled === false ? '<span class="muted small">(Pausado)</span>' : ''}</div>
+              <div class="entity-meta">Sala: <strong>${esc(tpl.name)}</strong> · <code>${esc(a.adapter)}</code></div>
             </div>
             <div class="entity-actions">
               <button class="btn btn-sm btn-secondary" data-edit-agent="${esc(a.id)}">Editar</button>
               <button class="btn btn-sm btn-danger-ghost" data-del-agent="${esc(a.id)}">Eliminar</button>
             </div>
-          </div>`
-        )
+          </div>`;
+        })
         .join('')
     : '<p class="muted">Esta oficina aún no tiene agentes. Pulsa "+ Nuevo Agente" para agregar el primero.</p>';
 
@@ -664,7 +651,6 @@ function renderManager() {
   });
 }
 
-// ---- Modales CRUD Agente ----
 function renderDynamicAdapterFields(adapter, cfg = {}) {
   const box = $('#af-dynamic-fields');
   if (adapter === 'github_action') {
@@ -759,6 +745,9 @@ function collectAgentFromForm() {
     name: $('#af-name').value.trim(),
     role: $('#af-role').value.trim(),
     avatar: $('#af-avatar').value,
+    roomStyle: $('#af-room-style').value,
+    roomImageUrl: $('#af-room-image').value.trim() || '',
+    roomAccent: $('#af-room-accent').value,
     adapter,
     enabled: $('#af-enabled').value === 'true',
     config
@@ -766,11 +755,15 @@ function collectAgentFromForm() {
 }
 
 function openAgentModal(agent = null) {
-  $('#agent-modal-title').textContent = agent ? 'Editar Agente' : 'Nuevo Agente';
+  const tpl = getRoomTemplate(agent?.roomStyle, agent);
+  $('#agent-modal-title').textContent = agent ? 'Editar Agente y Habitación' : 'Nuevo Agente';
   $('#af-id').value = agent ? agent.id : '';
   $('#af-name').value = agent ? agent.name : '';
   $('#af-role').value = agent ? agent.role : '';
   $('#af-avatar').value = agent ? agent.avatar : 'robot';
+  $('#af-room-style').value = tpl.id;
+  $('#af-room-image').value = agent?.roomImageUrl || '';
+  $('#af-room-accent').value = agent?.roomAccent || tpl.accent || '#f4a261';
   $('#af-adapter').value = agent ? agent.adapter : 'github_action';
   $('#af-enabled').value = agent && agent.enabled === false ? 'false' : 'true';
   $('#af-test-result').textContent = '';
@@ -794,8 +787,7 @@ function bindAgentCrudModal() {
     out.className = 'feedback-msg';
     out.textContent = 'Probando conexión...';
     try {
-      const agent = collectAgentFromForm();
-      const res = await store.api.testAgent(agent);
+      const res = await store.api.testAgent(collectAgentFromForm());
       out.className = 'feedback-msg ok';
       out.textContent = `✓ OK [${res.result.status}]: ${res.result.headline}`;
     } catch (err) {
@@ -810,7 +802,7 @@ function bindAgentCrudModal() {
       const agent = collectAgentFromForm();
       await store.upsertAgent(agent);
       $('#agent-modal').classList.add('hidden');
-      renderer.say(agent.id, '¡Listo para trabajar!');
+      renderer.say(agent.id, '¡Sala lista!');
       toast(`Agente "${agent.name}" guardado`);
     } catch (err) {
       toast('Error guardando agente: ' + err.message, true);
@@ -818,12 +810,11 @@ function bindAgentCrudModal() {
   });
 }
 
-// ---- Modal CRUD Oficina ----
 function openOfficeModal(office = null) {
   $('#office-modal-title').textContent = office ? 'Editar Oficina' : 'Nueva Oficina';
   $('#of-id').value = office ? office.id : '';
   $('#of-name').value = office ? office.name : '';
-  $('#of-icon').value = office ? office.icon || '🏢' : '⚡';
+  $('#of-icon').value = office ? office.icon || '🏡' : '⚡';
   $('#of-subtitle').value = office ? office.subtitle || '' : '';
   $('#office-modal').classList.remove('hidden');
 }
@@ -838,7 +829,7 @@ function bindOfficeCrudModal() {
     await store.upsertOffice({
       id: $('#of-id').value || null,
       name: $('#of-name').value.trim(),
-      icon: $('#of-icon').value.trim() || '🏢',
+      icon: $('#of-icon').value.trim() || '🏡',
       subtitle: $('#of-subtitle').value.trim()
     });
     $('#office-modal').classList.add('hidden');
@@ -846,14 +837,65 @@ function bindOfficeCrudModal() {
   });
 }
 
-// ---- Vista 4: Diseño, Conexión y Export/Import ----
+function renderRoomsGallery() {
+  const el = $('#rooms-gallery');
+  if (!el || !assetManager) return;
+
+  el.innerHTML = Object.values(ROOM_TEMPLATES)
+    .map((tpl) => {
+      const status = assetManager.getTemplateStatus(tpl.id);
+      const src = assetManager.getTemplateSrc(tpl.id);
+      return `<div class="room-gallery-card">
+        <div class="room-thumb">
+          ${src ? `<img src="${src}" alt="${esc(tpl.name)}" />` : `<span>Sin imagen aún<br/><code>${tpl.fileBase}.jpg</code></span>`}
+        </div>
+        <div class="room-gal-name">${tpl.icon} ${esc(tpl.name)}</div>
+        <div class="room-gal-file">${status === 'loaded' ? '✓ Cargada' : `assets/rooms/${tpl.fileBase}.jpg`}</div>
+        <div class="btn-row">
+          <label class="btn btn-sm btn-secondary file-btn" style="flex:1">
+            📷 Cargar
+            <input type="file" accept="image/*" data-upload-room="${tpl.id}" hidden />
+          </label>
+          ${assetManager.customOverrides[tpl.id] ? `<button class="btn btn-sm btn-danger-ghost" data-clear-room="${tpl.id}">✕</button>` : ''}
+        </div>
+      </div>`;
+    })
+    .join('');
+
+  el.querySelectorAll('[data-upload-room]').forEach((inp) => {
+    inp.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try {
+        const dataUrl = await compressImageFileToDataUrl(file);
+        assetManager.setCustomRoomImage(inp.dataset.uploadRoom, dataUrl);
+        toast(`Imagen cargada en ${ROOM_TEMPLATES[inp.dataset.uploadRoom].name}`);
+      } catch (err) {
+        toast(err.message, true);
+      }
+      e.target.value = '';
+    });
+  });
+
+  el.querySelectorAll('[data-clear-room]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      assetManager.setCustomRoomImage(btn.dataset.clearRoom, null);
+      toast('Restaurada ruta assets/rooms/');
+    });
+  });
+}
+
 function renderDesignPanel() {
+  const layoutMode = store.getLayoutMode();
+  $('#btn-mode-cozy').classList.toggle('btn-active-mode', layoutMode === 'cozy-rooms');
+  $('#btn-mode-open').classList.toggle('btn-active-mode', layoutMode === 'open-floor');
+
   const activeThemeId = store.getActiveThemeId();
   $('#themes-grid').innerHTML = Object.values(THEMES)
     .map(
       (th) => `<div class="theme-card ${th.id === activeThemeId ? 'selected' : ''}" data-theme-id="${th.id}">
         <div class="theme-swatches">
-          <span class="swatch" style="background:${th.canvas.floorA}"></span>
+          <span class="swatch" style="background:${th.canvas.bgTop}"></span>
           <span class="swatch" style="background:${th.canvas.wallTrim}"></span>
           <span class="swatch" style="background:${th.css['--accent']}"></span>
           <span class="swatch" style="background:${th.css['--accent-2']}"></span>
@@ -868,20 +910,28 @@ function renderDesignPanel() {
     card.addEventListener('click', async () => {
       const scope = document.querySelector('input[name="theme-scope"]:checked').value;
       await store.setTheme(card.dataset.themeId, scope);
-      toast(`Diseño "${THEMES[card.dataset.themeId].name}" aplicado`);
+      toast(`Tema "${THEMES[card.dataset.themeId].name}" aplicado`);
     });
   });
 
-  if (document.activeElement !== $('#cfg-bridge-url')) {
-    $('#cfg-bridge-url').value = store.state.bridgeUrl;
-  }
-  if (document.activeElement !== $('#cfg-api-secret')) {
-    $('#cfg-api-secret').value = store.state.apiSecret;
-  }
+  renderRoomsGallery();
+
+  if (document.activeElement !== $('#cfg-bridge-url')) $('#cfg-bridge-url').value = store.state.bridgeUrl;
+  if (document.activeElement !== $('#cfg-api-secret')) $('#cfg-api-secret').value = store.state.apiSecret;
   $('#cfg-refresh-min').value = String(store.state.config.refreshMinutes ?? 5);
 }
 
 function bindDesignView() {
+  $('#btn-mode-cozy').addEventListener('click', async () => {
+    await store.setLayoutMode('cozy-rooms');
+    toast('Modo Salas Cozy activado');
+  });
+
+  $('#btn-mode-open').addEventListener('click', async () => {
+    await store.setLayoutMode('open-floor');
+    toast('Modo Planta Abierta activado');
+  });
+
   $('#btn-save-connection').addEventListener('click', async () => {
     const fb = $('#conn-feedback');
     fb.className = 'feedback-msg';
@@ -936,7 +986,7 @@ function bindDesignView() {
   });
 
   $('#btn-reset-defaults').addEventListener('click', async () => {
-    if (!confirm('¿Restaurar la configuración inicial de tus 5 agentes?')) return;
+    if (!confirm('¿Restaurar la configuración inicial Cozy de tus 5 agentes?')) return;
     await store.resetToDefaults();
     toast('Configuración restaurada');
   });

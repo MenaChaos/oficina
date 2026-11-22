@@ -1,10 +1,13 @@
 /**
- * MOTOR VISUAL ISOMÉTRICO 2.5D (core/renderer.js)
- * Totalmente agnóstico a los datos: dibuja cualquier número de agentes,
- * en cualquier oficina y con cualquier tema de themes/themes.js.
+ * MOTOR VISUAL HÍBRIDO COZY 2.5D (core/renderer.js)
+ * Soporta dos modos intercambiables en vivo:
+ * 1) 'cozy-rooms' (Opción B): Cada agente en su propia habitación diorama ilustrada
+ *    con personaje animado, semáforo, brillo cálido, resumen en vivo y burbujas encima.
+ * 2) 'open-floor': Planta abierta isométrica clásica.
  */
 
 import { getTheme } from '../themes/themes.js';
+import { getRoomTemplate } from '../config/rooms.js';
 
 const STATUS_COLORS = {
   VERDE: '#22c55e',
@@ -14,23 +17,32 @@ const STATUS_COLORS = {
 };
 
 export class OfficeRenderer {
-  constructor(canvas, onSelectAgent) {
+  constructor(canvas, assetManager, onSelectAgent) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
+    this.assets = assetManager;
     this.onSelectAgent = onSelectAgent;
 
     this.agents = [];
     this.agentData = {};
-    this.themeId = 'cyber-studio';
+    this.themeId = 'cozy-warm';
+    this.layoutMode = 'cozy-rooms';
     this.selectedAgentId = null;
 
-    // Cámara interactiva
     this.cam = { x: 0, y: 0, zoom: 1 };
     this.hitBoxes = [];
-    this.bubbles = new Map(); // agentId -> { text, until }
-    this.remodelProgress = 1; // < 1 dispara barrido visual de remodelación
+    this.bubbles = new Map();
+    this.remodelProgress = 1;
 
-    // Estado de arrastre y pellizco táctil
+    // Partículas cálidas flotantes (ambiente cozy)
+    this.motes = Array.from({ length: 28 }, () => ({
+      x: Math.random(),
+      y: Math.random(),
+      r: 1.2 + Math.random() * 2.2,
+      s: 0.25 + Math.random() * 0.55,
+      p: Math.random() * Math.PI * 2
+    }));
+
     this.pointers = new Map();
     this.dragging = false;
     this.dragMoved = false;
@@ -46,11 +58,16 @@ export class OfficeRenderer {
     this.startLoop();
   }
 
-  setScene({ agents, agentData, themeId, selectedAgentId, triggerRemodel = false }) {
+  setScene({ agents, agentData, themeId, layoutMode, selectedAgentId, triggerRemodel = false }) {
     this.agents = agents || [];
     this.agentData = agentData || {};
     if (themeId && themeId !== this.themeId) {
       this.themeId = themeId;
+      this.remodelProgress = 0;
+    }
+    if (layoutMode && layoutMode !== this.layoutMode) {
+      this.layoutMode = layoutMode;
+      this.resetCamera();
       this.remodelProgress = 0;
     } else if (triggerRemodel) {
       this.remodelProgress = 0;
@@ -60,7 +77,7 @@ export class OfficeRenderer {
     }
   }
 
-  say(agentId, text, durationMs = 4500) {
+  say(agentId, text, durationMs = 4800) {
     this.bubbles.set(agentId, { text, until: performance.now() + durationMs });
   }
 
@@ -69,7 +86,7 @@ export class OfficeRenderer {
   }
 
   zoomBy(factor) {
-    this.cam.zoom = Math.max(0.55, Math.min(2.1, this.cam.zoom * factor));
+    this.cam.zoom = Math.max(0.55, Math.min(2.2, this.cam.zoom * factor));
   }
 
   resize() {
@@ -108,7 +125,7 @@ export class OfficeRenderer {
       if (this.pointers.size === 2 && this.pinchStartDist) {
         const pts = Array.from(this.pointers.values());
         const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
-        this.cam.zoom = Math.max(0.55, Math.min(2.1, this.pinchStartZoom * (dist / this.pinchStartDist)));
+        this.cam.zoom = Math.max(0.55, Math.min(2.2, this.pinchStartZoom * (dist / this.pinchStartDist)));
         this.dragMoved = true;
         return;
       }
@@ -141,15 +158,13 @@ export class OfficeRenderer {
       'wheel',
       (e) => {
         e.preventDefault();
-        const factor = e.deltaY < 0 ? 1.09 : 0.92;
-        this.zoomBy(factor);
+        this.zoomBy(e.deltaY < 0 ? 1.09 : 0.92);
       },
       { passive: false }
     );
   }
 
   handleClick(px, py) {
-    // Recorrer de adelante hacia atrás para respetar profundidad isométrica
     for (let i = this.hitBoxes.length - 1; i >= 0; i--) {
       const hb = this.hitBoxes[i];
       if (px >= hb.x && px <= hb.x + hb.w && py >= hb.y && py <= hb.y + hb.h) {
@@ -160,52 +175,11 @@ export class OfficeRenderer {
     }
   }
 
-  // Proyección isométrica estándar
-  iso(gx, gy, gz = 0) {
-    const tileW = 76;
-    const tileH = 38;
-    const x = (gx - gy) * (tileW / 2);
-    const y = (gx + gy) * (tileH / 2) - gz;
-    return { x, y };
-  }
-
-  /**
-   * Genera dinámicamente posiciones en la planta según cuántos agentes tenga la oficina.
-   */
-  computeLayout(count) {
-    const baseSlots = [
-      { gx: 1.5, gy: 1.4 },
-      { gx: 4.5, gy: 1.4 },
-      { gx: 7.4, gy: 1.6 },
-      { gx: 1.5, gy: 5.5 },
-      { gx: 7.4, gy: 5.5 },
-      { gx: 4.5, gy: 6.4 },
-      { gx: 1.5, gy: 8.6 },
-      { gx: 4.5, gy: 8.8 },
-      { gx: 7.4, gy: 8.6 }
-    ];
-
-    const gridCols = 9;
-    const gridRows = count > 6 ? 11 : 8;
-
-    const slots = [];
-    for (let i = 0; i < count; i++) {
-      if (i < baseSlots.length) {
-        slots.push(baseSlots[i]);
-      } else {
-        const extra = i - baseSlots.length;
-        slots.push({ gx: 1.6 + (extra % 3) * 2.9, gy: 10 + Math.floor(extra / 3) * 2.5 });
-      }
-    }
-
-    return { gridCols, gridRows: Math.max(gridRows, Math.ceil((count > 9 ? 13 : gridRows))), slots };
-  }
-
   startLoop() {
     const loop = () => {
-      this.t += 0.032;
+      this.t += 0.03;
       if (this.remodelProgress < 1) {
-        this.remodelProgress = Math.min(1, this.remodelProgress + 0.035);
+        this.remodelProgress = Math.min(1, this.remodelProgress + 0.038);
       }
       this.draw();
       this.rafId = requestAnimationFrame(loop);
@@ -219,327 +193,559 @@ export class OfficeRenderer {
     const W = this.width;
     const H = this.height;
 
-    // Fondo degradado
-    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    // Fondo degradado suave
+    const grad = ctx.createRadialGradient(W * 0.5, H * 0.45, 40, W * 0.5, H * 0.5, Math.max(W, H) * 0.78);
     grad.addColorStop(0, theme.bgTop);
     grad.addColorStop(1, theme.bgBottom);
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, W, H);
 
-    const layout = this.computeLayout(this.agents.length);
-    const scaleBase = Math.min(W / 860, H / 560);
-    const scale = Math.max(0.58, Math.min(1.32, scaleBase)) * this.cam.zoom;
+    // Partículas ambientales cozy
+    ctx.save();
+    ctx.fillStyle = theme.particleColor || 'rgba(255,220,170,0.35)';
+    this.motes.forEach((m) => {
+      const mx = ((m.x + Math.sin(this.t * 0.25 * m.s + m.p) * 0.03 + 1) % 1) * W;
+      const my = ((m.y - this.t * 0.004 * m.s) % 1 + 1) % 1 * H;
+      ctx.globalAlpha = 0.22 + Math.sin(this.t * 1.4 + m.p) * 0.18;
+      ctx.beginPath();
+      ctx.arc(mx, my, m.r, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.restore();
+
+    if (this.layoutMode === 'open-floor') {
+      this.drawOpenFloorMode(ctx, theme, W, H);
+    } else {
+      this.drawCozyRoomsMode(ctx, theme, W, H);
+    }
+
+    // Efecto de remodelación cálido al cambiar tema o vista
+    if (this.remodelProgress < 1) {
+      const sweepX = W * this.remodelProgress;
+      ctx.save();
+      const beam = ctx.createLinearGradient(sweepX - 90, 0, sweepX + 20, 0);
+      beam.addColorStop(0, 'rgba(244,162,97,0)');
+      beam.addColorStop(0.75, 'rgba(244,162,97,0.28)');
+      beam.addColorStop(1, 'rgba(255,248,235,0.62)');
+      ctx.fillStyle = beam;
+      ctx.fillRect(sweepX - 90, 0, 110, H);
+      ctx.restore();
+    }
+  }
+
+  // ==========================================================================
+  // MODO 1: SALAS COZY DIORAMA INDEPENDIENTES (OPCIÓN B — HÍBRIDO)
+  // ==========================================================================
+  drawCozyRoomsMode(ctx, theme, W, H) {
+    this.hitBoxes = [];
+    const agents = this.agents;
+    const count = agents.length;
+    if (count === 0) return;
+
+    // Calcular cuadrícula equilibrada según proporción de pantalla (iPad horizontal/vertical o monitor)
+    const isPortrait = H > W * 1.05;
+    let cols = isPortrait ? 2 : count <= 2 ? count : count <= 4 ? 2 : count <= 6 ? 3 : 4;
+    if (W < 640) cols = 1;
+    const rows = Math.ceil(count / cols);
+
+    // Espacio útil respetando HUD superior y quickbar inferior
+    const padTop = 76;
+    const padBottom = 80;
+    const padSide = 26;
+    const availW = Math.max(280, W - padSide * 2);
+    const availH = Math.max(240, H - padTop - padBottom);
+
+    const gap = 24;
+    const maxCardW = (availW - gap * (cols - 1)) / cols;
+    const maxCardH = (availH - gap * (rows - 1)) / rows;
+    // Proporción elegante para el diorama 1:1 + pie con título y estado vivo
+    const cardW = Math.max(210, Math.min(365, maxCardW, maxCardH * 0.94));
+    const cardH = Math.round(cardW * 1.07);
+
+    const totalH = rows * cardH + (rows - 1) * gap;
+    const baseStartY = padTop + Math.max(0, (availH - totalH) / 2);
+
+    ctx.save();
+    ctx.translate(W / 2 + this.cam.x, H / 2 + this.cam.y);
+    ctx.scale(this.cam.zoom, this.cam.zoom);
+    ctx.translate(-W / 2, -H / 2);
+
+    agents.forEach((agent, idx) => {
+      const row = Math.floor(idx / cols);
+      const col = idx % cols;
+      // Centrar la última fila cuando tiene menos elementos (ej: 3 arriba + 2 abajo)
+      const itemsInRow = row === rows - 1 ? count - row * cols : cols;
+      const rowW = itemsInRow * cardW + (itemsInRow - 1) * gap;
+      const startX = (W - rowW) / 2;
+
+      const x = startX + col * (cardW + gap);
+      const y = baseStartY + row * (cardH + gap);
+
+      this.drawCozyRoomCard(ctx, x, y, cardW, cardH, agent, theme);
+
+      // Registrar hitbox en coordenadas de pantalla transformadas
+      const sx = (x - W / 2) * this.cam.zoom + W / 2 + this.cam.x;
+      const sy = (y - H / 2) * this.cam.zoom + H / 2 + this.cam.y;
+      this.hitBoxes.push({
+        agentId: agent.id,
+        x: sx,
+        y: sy,
+        w: cardW * this.cam.zoom,
+        h: cardH * this.cam.zoom
+      });
+    });
+
+    ctx.restore();
+  }
+
+  drawCozyRoomCard(ctx, x, y, w, h, agent, theme) {
+    const live = this.agentData[agent.id] || {};
+    const status = agent.enabled === false ? 'PAUSADO' : live.status || 'VERDE';
+    const activity = agent.enabled === false ? 'idle' : live.activity || 'idle';
+    const isSelected = this.selectedAgentId === agent.id;
+    const statusColor = STATUS_COLORS[status] || STATUS_COLORS.VERDE;
+    const tpl = getRoomTemplate(agent.roomStyle, agent);
+    const accentColor = agent.roomAccent || tpl.accent;
+
+    const r = 22;
+
+    // Halo exterior suave (selección o alerta roja pulsante)
+    if (isSelected || status === 'ROJO' || activity === 'working') {
+      const pulse = 0.55 + Math.sin(this.t * 4) * 0.28;
+      ctx.save();
+      ctx.shadowColor = isSelected ? accentColor : statusColor;
+      ctx.shadowBlur = isSelected ? 26 : 18 + pulse * 10;
+      ctx.strokeStyle = isSelected ? accentColor : statusColor;
+      ctx.lineWidth = isSelected ? 2.6 : 1.8;
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, r);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Fondo de tarjeta sala
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, r);
+    ctx.fillStyle = theme.roomCardBg || '#212327';
+    ctx.fill();
+    ctx.clip();
+
+    // Área visual del diorama (parte superior cuadrada)
+    const imgSize = w;
+    const imgY = y - w * 0.04;
+    const roomImg = this.assets ? this.assets.getImageForAgent(agent, tpl.id) : null;
+
+    if (roomImg) {
+      // Dibujar ilustración cozy centrada con zoom ligero para llenar bien el marco
+      const drawPad = w * 0.02;
+      ctx.drawImage(roomImg, x - drawPad, imgY - drawPad, imgSize + drawPad * 2, imgSize + drawPad * 2);
+
+      // Brillo cálido sutil respirando (sensación de lámpara viva)
+      const lampPulse = 0.75 + Math.sin(this.t * 1.8 + x * 0.01) * 0.25;
+      const glow = ctx.createRadialGradient(
+        x + w * 0.5,
+        y + w * 0.45,
+        w * 0.06,
+        x + w * 0.5,
+        y + w * 0.45,
+        w * 0.48
+      );
+      glow.addColorStop(0, tpl.lampGlow || 'rgba(255, 200, 120, 0.22)');
+      glow.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.globalAlpha = lampPulse * 0.55;
+      ctx.fillStyle = glow;
+      ctx.fillRect(x, y, w, h);
+      ctx.globalAlpha = 1;
+    } else {
+      // Fallback cozy procedimental (si aún no suben el .jpg a assets/rooms/)
+      this.drawCozyFallbackDiorama(ctx, x, y, w, h * 0.78, agent, tpl);
+    }
+
+    // Degradado inferior para legibilidad impecable del nombre y estado en vivo
+    const footGrad = ctx.createLinearGradient(0, y + h * 0.56, 0, y + h);
+    footGrad.addColorStop(0, 'rgba(18, 19, 22, 0)');
+    footGrad.addColorStop(0.55, 'rgba(18, 19, 22, 0.76)');
+    footGrad.addColorStop(1, 'rgba(18, 19, 22, 0.96)');
+    ctx.fillStyle = footGrad;
+    ctx.fillRect(x, y + h * 0.55, w, h * 0.46);
+
+    // Personaje vivo animado sobre la sala
+    const anchor = agent.charAnchor || tpl.defaultAnchor || { x: 0.5, y: 0.65 };
+    const bob = activity === 'working' ? Math.abs(Math.sin(this.t * 6.5)) * 4.5 : Math.sin(this.t * 2.2 + x * 0.02) * 2;
+    const cx = x + w * anchor.x;
+    const cy = y + h * anchor.y - bob;
+    const charScale = Math.max(0.85, Math.min(1.25, w / 285));
+    this.drawCozyCharacter(ctx, cx, cy, charScale, agent.avatar, status, activity);
+
+    // Etiqueta superior izquierda: tipo de habitación
+    ctx.font = '700 10.5px -apple-system, BlinkMacSystemFont, sans-serif';
+    const roomTag = `${tpl.icon} ${tpl.name}`;
+    const tagW = ctx.measureText(roomTag).width + 18;
+    ctx.fillStyle = 'rgba(18, 19, 22, 0.74)';
+    ctx.beginPath();
+    ctx.roundRect(x + 12, y + 12, tagW, 24, 999);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = '#f5efe6';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(roomTag, x + 21, y + 24);
+
+    // Semáforo superior derecho
+    const pillText = status;
+    ctx.font = '800 10px -apple-system, BlinkMacSystemFont, sans-serif';
+    const pillW = ctx.measureText(pillText).width + 26;
+    const pillX = x + w - pillW - 12;
+    ctx.fillStyle = 'rgba(18, 19, 22, 0.82)';
+    ctx.beginPath();
+    ctx.roundRect(pillX, y + 12, pillW, 24, 999);
+    ctx.fill();
+    ctx.strokeStyle = statusColor;
+    ctx.lineWidth = 1.3;
+    ctx.stroke();
+
+    ctx.fillStyle = statusColor;
+    ctx.beginPath();
+    ctx.arc(pillX + 11, y + 24, status === 'ROJO' ? 4.5 + Math.sin(this.t * 6) * 1 : 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(pillText, pillX + 20, y + 24.5);
+
+    // Pie de la sala: Nombre del agente + dato vivo resumido
+    ctx.textAlign = 'left';
+    ctx.font = '800 15px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.fillStyle = '#fbf6ee';
+    ctx.fillText(agent.name, x + 16, y + h - 38);
+
+    const headline = this.getShortHeadline(agent, live);
+    ctx.font = '500 11.8px -apple-system, BlinkMacSystemFont, sans-serif';
+    ctx.fillStyle = status === 'ROJO' ? '#fca5a5' : status === 'AMARILLO' ? '#fcd34d' : '#c7beb2';
+    ctx.fillText(this.truncateText(ctx, headline, w - 32), x + 16, y + h - 18);
+
+    // Burbuja de diálogo temporal (cuando disparas una acción o llega alerta)
+    const bubble = this.bubbles.get(agent.id);
+    if (bubble && bubble.until > performance.now()) {
+      ctx.font = '700 11px -apple-system, sans-serif';
+      const bText = this.truncateText(ctx, bubble.text, w - 44);
+      const bw = ctx.measureText(bText).width + 20;
+      const bx = Math.max(x + 12, Math.min(x + w - bw - 12, cx - bw / 2));
+      const by = Math.max(y + 42, cy - 52 * charScale);
+      ctx.fillStyle = '#fffdf8';
+      ctx.beginPath();
+      ctx.roundRect(bx, by, bw, 25, 10);
+      ctx.fill();
+      ctx.fillStyle = '#1f1a17';
+      ctx.textAlign = 'center';
+      ctx.fillText(bText, bx + bw / 2, by + 13);
+    }
+
+    ctx.restore();
+
+    // Borde sutil de la tarjeta
+    ctx.strokeStyle = isSelected ? accentColor : theme.roomCardBorder || 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = isSelected ? 2.2 : 1.1;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, r);
+    ctx.stroke();
+  }
+
+  drawCozyFallbackDiorama(ctx, x, y, w, h, agent, tpl) {
+    // Mini diorama isométrico cálido mientras se suben las imágenes .jpg a assets/rooms/
+    const cx = x + w / 2;
+    const cy = y + h * 0.56;
+    const s = w * 0.34;
+
+    const grad = ctx.createRadialGradient(cx, cy - s * 0.25, 8, cx, cy, s * 1.45);
+    grad.addColorStop(0, tpl.lampGlow || 'rgba(244,162,97,0.32)');
+    grad.addColorStop(1, 'rgba(20,21,24,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(x, y, w, h);
+
+    // Piso rombo cálido
+    this.drawPoly(
+      ctx,
+      [
+        { x: cx, y: cy - s * 0.45 },
+        { x: cx + s, y: cy + s * 0.05 },
+        { x: cx, y: cy + s * 0.55 },
+        { x: cx - s, y: cy + s * 0.05 }
+      ],
+      tpl.floorColor,
+      'rgba(255,240,220,0.14)',
+      1.2
+    );
+    // Pared izquierda
+    this.drawPoly(
+      ctx,
+      [
+        { x: cx - s, y: cy + s * 0.05 },
+        { x: cx, y: cy - s * 0.45 },
+        { x: cx, y: cy - s * 1.18 },
+        { x: cx - s, y: cy - s * 0.68 }
+      ],
+      tpl.wallColor,
+      'rgba(0,0,0,0.2)',
+      1
+    );
+    // Pared derecha
+    this.drawPoly(
+      ctx,
+      [
+        { x: cx, y: cy - s * 0.45 },
+        { x: cx + s, y: cy + s * 0.05 },
+        { x: cx + s, y: cy - s * 0.68 },
+        { x: cx, y: cy - s * 1.18 }
+      ],
+      '#3a322c',
+      'rgba(0,0,0,0.2)',
+      1
+    );
+
+    // Sello de sala en espera de imagen
+    ctx.font = '600 10.5px -apple-system, sans-serif';
+    ctx.fillStyle = 'rgba(255, 244, 230, 0.55)';
+    ctx.textAlign = 'center';
+    ctx.fillText(`assets/rooms/${tpl.fileBase}.jpg`, cx, y + h * 0.9);
+  }
+
+  drawCozyCharacter(ctx, cx, cy, scale, avatar, status, activity) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(scale, scale);
+
+    // Sombra suave bajo el personaje
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
+    ctx.beginPath();
+    ctx.ellipse(0, 12, 16, 6.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Aro sutil de actividad si está trabajando o en alerta
+    if (activity === 'working' || status === 'ROJO') {
+      ctx.strokeStyle = status === 'ROJO' ? '#ef4444' : '#38bdf8';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(0, 12, 20 + Math.sin(this.t * 5) * 2.5, 8.5, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    const bodyColors = {
+      contador: '#3b82f6',
+      combustible: '#dc2626',
+      mecanico: '#d97706',
+      perro: '#9a5b25',
+      profesor: '#f1f5f9',
+      bateria: '#059669',
+      robot: '#7c3aed',
+      servidor: '#0891b2',
+      camara: '#64748b'
+    };
+
+    // Cuerpo estilo chibi cozy con contorno oscuro suave
+    ctx.fillStyle = bodyColors[avatar] || '#f4a261';
+    ctx.strokeStyle = 'rgba(20, 16, 14, 0.85)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(-10, -8, 20, 20, 8);
+    ctx.fill();
+    ctx.stroke();
+
+    // Cabeza
+    ctx.fillStyle = avatar === 'perro' ? '#b4692c' : avatar === 'robot' ? '#cbd5e1' : '#fde2b8';
+    ctx.beginPath();
+    ctx.arc(0, -16, 10.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Ojitos cozy
+    ctx.fillStyle = '#1f1a17';
+    ctx.beginPath();
+    ctx.arc(-3.5, -16, 1.5, 0, Math.PI * 2);
+    ctx.arc(3.5, -16, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Rasgos característicos
+    if (avatar === 'profesor') {
+      ctx.strokeStyle = '#0f172a';
+      ctx.lineWidth = 1.6;
+      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      ctx.fillRect(-7.5, -19.5, 6.2, 5.2);
+      ctx.fillRect(1.3, -19.5, 6.2, 5.2);
+      ctx.strokeRect(-7.5, -19.5, 6.2, 5.2);
+      ctx.strokeRect(1.3, -19.5, 6.2, 5.2);
+    } else if (avatar === 'perro') {
+      ctx.fillStyle = '#783f15';
+      ctx.beginPath();
+      ctx.roundRect(-13.5, -19, 4.5, 10, 2.5);
+      ctx.roundRect(9, -19, 4.5, 10, 2.5);
+      ctx.fill();
+      ctx.fillStyle = '#1f1a17';
+      ctx.beginPath();
+      ctx.arc(0, -12.5, 2.1, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (avatar === 'mecanico') {
+      // Gorra de mecánico
+      ctx.fillStyle = '#b91c1c';
+      ctx.beginPath();
+      ctx.arc(0, -20, 10, Math.PI, 0);
+      ctx.fill();
+      ctx.fillRect(-10, -21, 16, 3);
+    } else if (avatar === 'robot') {
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, -26.5);
+      ctx.lineTo(0, -33);
+      ctx.stroke();
+      ctx.fillStyle = '#38bdf8';
+      ctx.beginPath();
+      ctx.arc(0, -34, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
+  getShortHeadline(agent, live) {
+    if (agent.enabled === false) return 'Agente pausado';
+    if (!live || Object.keys(live).length === 0) return 'Esperando sincronización...';
+    if (live.error) return 'Error: ' + live.error;
+    if (agent.adapter === 'servicios_hogar' && live.metrics) {
+      return live.metrics.pendingCount > 0
+        ? `${live.metrics.pendingCount} pendiente(s) · ${live.metrics.totalPendingDisplay}`
+        : 'Todas las cuentas al día ✓';
+    }
+    if (agent.adapter === 'combustible_copec' && live.lastReceipt) {
+      return `Última: ${live.lastReceipt.combustible} ${live.lastReceipt.montoDisplay} · ${live.metrics?.pendingReimbursementsCount ?? 0} pend.`;
+    }
+    if (agent.adapter === 'mg6_mecanico' && live.telemetry) {
+      const uv = live.telemetry.ultimoViaje || {};
+      return `${live.telemetry.estadoGeneral} · ${uv.tempMaxC || '-'}°C · ${uv.voltajeMinV || '-'}V`;
+    }
+    return live.headline || 'Operativo';
+  }
+
+  truncateText(ctx, text, maxW) {
+    if (ctx.measureText(text).width <= maxW) return text;
+    let s = text;
+    while (s.length > 4 && ctx.measureText(s + '…').width > maxW) {
+      s = s.slice(0, -1);
+    }
+    return s + '…';
+  }
+
+  // ==========================================================================
+  // MODO 2: PLANTA ABIERTA ISOMÉTRICA CLÁSICA (OPCIONAL)
+  // ==========================================================================
+  iso(gx, gy, gz = 0) {
+    return { x: (gx - gy) * 38, y: (gx + gy) * 19 - gz };
+  }
+
+  computeOpenLayout(count) {
+    const baseSlots = [
+      { gx: 1.5, gy: 1.4 },
+      { gx: 4.6, gy: 1.3 },
+      { gx: 7.5, gy: 1.7 },
+      { gx: 1.5, gy: 5.7 },
+      { gx: 7.4, gy: 5.7 },
+      { gx: 4.5, gy: 6.5 }
+    ];
+    const slots = [];
+    for (let i = 0; i < count; i++) {
+      if (i < baseSlots.length) slots.push(baseSlots[i]);
+      else slots.push({ gx: 1.6 + ((i - 6) % 3) * 2.9, gy: 8.8 + Math.floor((i - 6) / 3) * 2.4 });
+    }
+    return { gridCols: 9, gridRows: count > 6 ? 11 : 8, slots };
+  }
+
+  drawOpenFloorMode(ctx, theme, W, H) {
+    const layout = this.computeOpenLayout(this.agents.length);
+    const scaleBase = Math.min(W / 690, H / 470);
+    const scale = Math.max(0.75, Math.min(1.55, scaleBase)) * this.cam.zoom;
 
     const centerTile = this.iso(layout.gridCols / 2, layout.gridRows / 2, 0);
     const originX = W / 2 - centerTile.x * scale + this.cam.x;
-    const originY = H / 2 - centerTile.y * scale + 28 * scale + this.cam.y;
+    const originY = H / 2 - centerTile.y * scale + 26 * scale + this.cam.y;
 
     ctx.save();
     ctx.translate(originX, originY);
     ctx.scale(scale, scale);
 
-    // 1. Piso isométrico + paredes traseras
-    this.drawFloorAndWalls(ctx, layout.gridCols, layout.gridRows, theme);
+    this.drawBox(ctx, 0, 0, layout.gridCols, layout.gridRows, -14, theme.floorA, theme.floorEdge, theme.floorEdge);
+    for (let x = 0; x < layout.gridCols; x++) {
+      for (let y = 0; y < layout.gridRows; y++) {
+        this.drawPoly(
+          ctx,
+          [this.iso(x, y, 0), this.iso(x + 1, y, 0), this.iso(x + 1, y + 1, 0), this.iso(x, y + 1, 0)],
+          (x + y) % 2 === 0 ? theme.floorA : theme.floorB,
+          theme.floorGrid,
+          0.8
+        );
+      }
+    }
 
-    // 2. Patio central (cafetera con vapor + rack de servidores)
-    this.drawCentralHub(ctx, 4.4, 3.6, theme);
+    const wallH = 74;
+    const o = this.iso(0, 0, 0);
+    const rx = this.iso(layout.gridCols, 0, 0);
+    const ly = this.iso(0, layout.gridRows, 0);
+    const ot = this.iso(0, 0, wallH);
+    const rxt = this.iso(layout.gridCols, 0, wallH);
+    const lyt = this.iso(0, layout.gridRows, wallH);
+    this.drawPoly(ctx, [o, ly, lyt, ot], theme.wallLeft, 'rgba(0,0,0,0.2)', 1);
+    this.drawPoly(ctx, [o, rx, rxt, ot], theme.wallRight, 'rgba(0,0,0,0.2)', 1);
 
-    // 3. Estaciones de agentes ordenadas por profundidad (gx + gy)
     this.hitBoxes = [];
-    const drawList = this.agents.map((agent, idx) => ({
-      agent,
-      pos: layout.slots[idx] || { gx: 2, gy: 2 }
-    }));
+    const drawList = this.agents.map((agent, idx) => ({ agent, pos: layout.slots[idx] || { gx: 2, gy: 2 } }));
     drawList.sort((a, b) => a.pos.gx + a.pos.gy - (b.pos.gx + b.pos.gy));
 
     drawList.forEach(({ agent, pos }) => {
       const live = this.agentData[agent.id] || {};
       const status = agent.enabled === false ? 'PAUSADO' : live.status || 'VERDE';
       const activity = agent.enabled === false ? 'idle' : live.activity || 'idle';
-      const screenPt = this.iso(pos.gx, pos.gy, 0);
+      this.drawBox(ctx, pos.gx - 0.45, pos.gy - 0.3, 1.25, 0.68, 16, theme.deskTop, theme.deskSide, '#0f172a');
+      const charPt = this.iso(pos.gx + 0.15, pos.gy + 0.62, 16);
+      this.drawCozyCharacter(ctx, charPt.x, charPt.y, 0.85, agent.avatar, status, activity);
 
-      this.drawStation(ctx, pos.gx, pos.gy, agent, status, activity, theme);
+      const labelPt = this.iso(pos.gx + 0.15, pos.gy + 0.95, -10);
+      ctx.font = '700 11px -apple-system, sans-serif';
+      const tw = ctx.measureText(agent.name).width + 16;
+      ctx.fillStyle = theme.labelBg;
+      ctx.beginPath();
+      ctx.roundRect(labelPt.x - tw / 2, labelPt.y - 10, tw, 20, 7);
+      ctx.fill();
+      ctx.fillStyle = theme.labelText;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(agent.name, labelPt.x, labelPt.y);
 
-      // Guardar hitbox en coordenadas reales del canvas
-      const sx = originX + screenPt.x * scale;
-      const sy = originY + screenPt.y * scale;
+      const pt = this.iso(pos.gx, pos.gy, 0);
       this.hitBoxes.push({
         agentId: agent.id,
-        x: sx - 58 * scale,
-        y: sy - 76 * scale,
+        x: originX + pt.x * scale - 58 * scale,
+        y: originY + pt.y * scale - 76 * scale,
         w: 116 * scale,
         h: 98 * scale
       });
     });
 
     ctx.restore();
-
-    // Efecto visual de remodelación al cambiar de diseño
-    if (this.remodelProgress < 1) {
-      const sweepX = W * this.remodelProgress;
-      ctx.save();
-      const beam = ctx.createLinearGradient(sweepX - 80, 0, sweepX + 20, 0);
-      beam.addColorStop(0, 'rgba(56,189,248,0)');
-      beam.addColorStop(0.7, 'rgba(56,189,248,0.28)');
-      beam.addColorStop(1, 'rgba(255,255,255,0.65)');
-      ctx.fillStyle = beam;
-      ctx.fillRect(sweepX - 80, 0, 100, H);
-      ctx.restore();
-    }
   }
 
   drawPoly(ctx, pts, fill, stroke = null, lineWidth = 1) {
     ctx.beginPath();
     pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
     ctx.closePath();
-    if (fill) {
-      ctx.fillStyle = fill;
-      ctx.fill();
-    }
-    if (stroke) {
-      ctx.strokeStyle = stroke;
-      ctx.lineWidth = lineWidth;
-      ctx.stroke();
-    }
+    if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+    if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lineWidth; ctx.stroke(); }
   }
 
   drawBox(ctx, gx, gy, w, d, h, topColor, leftColor, rightColor, stroke = null) {
-    const p00 = this.iso(gx, gy, 0);
-    const p10 = this.iso(gx + w, gy, 0);
-    const p11 = this.iso(gx + w, gy + d, 0);
-    const p01 = this.iso(gx, gy + d, 0);
-
-    const t00 = this.iso(gx, gy, h);
-    const t10 = this.iso(gx + w, gy, h);
-    const t11 = this.iso(gx + w, gy + d, h);
-    const t01 = this.iso(gx, gy + d, h);
-
+    const p00 = this.iso(gx, gy, 0), p10 = this.iso(gx + w, gy, 0), p11 = this.iso(gx + w, gy + d, 0), p01 = this.iso(gx, gy + d, 0);
+    const t00 = this.iso(gx, gy, h), t10 = this.iso(gx + w, gy, h), t11 = this.iso(gx + w, gy + d, h), t01 = this.iso(gx, gy + d, h);
     this.drawPoly(ctx, [p01, p11, t11, t01], leftColor, stroke, 0.7);
     this.drawPoly(ctx, [p10, p11, t11, t10], rightColor, stroke, 0.7);
     this.drawPoly(ctx, [t00, t10, t11, t01], topColor, stroke, 0.8);
-  }
-
-  drawFloorAndWalls(ctx, cols, rows, theme) {
-    // Base 3D del piso
-    this.drawBox(ctx, 0, 0, cols, rows, -14, theme.floorA, theme.floorEdge, theme.floorEdge);
-
-    // Baldosas en damero sutil
-    for (let x = 0; x < cols; x++) {
-      for (let y = 0; y < rows; y++) {
-        const p0 = this.iso(x, y, 0);
-        const p1 = this.iso(x + 1, y, 0);
-        const p2 = this.iso(x + 1, y + 1, 0);
-        const p3 = this.iso(x, y + 1, 0);
-        const fill = (x + y) % 2 === 0 ? theme.floorA : theme.floorB;
-        this.drawPoly(ctx, [p0, p1, p2, p3], fill, theme.floorGrid, 0.8);
-      }
-    }
-
-    // Paredes traseras (izquierda y derecha)
-    const wallH = 74;
-    const o = this.iso(0, 0, 0);
-    const rx = this.iso(cols, 0, 0);
-    const ly = this.iso(0, rows, 0);
-    const ot = this.iso(0, 0, wallH);
-    const rxt = this.iso(cols, 0, wallH);
-    const lyt = this.iso(0, rows, wallH);
-
-    this.drawPoly(ctx, [o, ly, lyt, ot], theme.wallLeft, 'rgba(0,0,0,0.2)', 1);
-    this.drawPoly(ctx, [o, rx, rxt, ot], theme.wallRight, 'rgba(0,0,0,0.2)', 1);
-
-    // Moldura superior neón / acento
-    ctx.strokeStyle = theme.wallTrim;
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.moveTo(lyt.x, lyt.y);
-    ctx.lineTo(ot.x, ot.y);
-    ctx.lineTo(rxt.x, rxt.y);
-    ctx.stroke();
-
-    // Ventana panorámica decorativa en pared trasera
-    const w1 = this.iso(2.4, 0, 20);
-    const w2 = this.iso(6.4, 0, 20);
-    const w3 = this.iso(6.4, 0, 56);
-    const w4 = this.iso(2.4, 0, 56);
-    this.drawPoly(ctx, [w1, w2, w3, w4], 'rgba(56, 189, 248, 0.14)', theme.wallTrim, 1.2);
-  }
-
-  drawCentralHub(ctx, gx, gy, theme) {
-    // Alfombra lounge
-    const p0 = this.iso(gx - 0.9, gy - 0.8, 0.5);
-    const p1 = this.iso(gx + 1.3, gy - 0.8, 0.5);
-    const p2 = this.iso(gx + 1.3, gy + 1.2, 0.5);
-    const p3 = this.iso(gx - 0.9, gy + 1.2, 0.5);
-    this.drawPoly(ctx, [p0, p1, p2, p3], theme.loungeRug, theme.loungeBorder, 1.5);
-
-    // Mini Rack de Servidores con LEDs parpadeando
-    this.drawBox(ctx, gx - 0.55, gy - 0.45, 0.55, 0.55, 36, '#334155', '#1e293b', '#0f172a', 'rgba(255,255,255,0.12)');
-    for (let i = 0; i < 4; i++) {
-      const ledPt = this.iso(gx - 0.1, gy - 0.3 + i * 0.1, 28 - i * 5);
-      const on = Math.sin(this.t * 3.2 + i * 1.7) > -0.2;
-      ctx.fillStyle = on ? (i === 0 ? '#38bdf8' : '#22c55e') : '#1e293b';
-      ctx.beginPath();
-      ctx.arc(ledPt.x, ledPt.y, 2, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // Mesita + cafetera con vapor animado
-    this.drawBox(ctx, gx + 0.35, gy + 0.15, 0.65, 0.55, 14, theme.deskTop, theme.deskSide, '#0f172a');
-    this.drawBox(ctx, gx + 0.5, gy + 0.25, 0.28, 0.28, 26, '#475569', '#334155', '#1e293b');
-    const steamBase = this.iso(gx + 0.64, gy + 0.38, 28);
-    ctx.strokeStyle = 'rgba(255,255,255,0.38)';
-    ctx.lineWidth = 1.4;
-    for (let s = 0; s < 2; s++) {
-      const phase = (this.t * 1.4 + s * 1.6) % 2;
-      ctx.beginPath();
-      ctx.moveTo(steamBase.x + s * 5 - 2, steamBase.y - phase * 6);
-      ctx.quadraticCurveTo(
-        steamBase.x + s * 5 + Math.sin(this.t * 3 + s) * 4,
-        steamBase.y - phase * 10 - 5,
-        steamBase.x + s * 5 - 2,
-        steamBase.y - phase * 13 - 10
-      );
-      ctx.stroke();
-    }
-  }
-
-  drawStation(ctx, gx, gy, agent, status, activity, theme) {
-    const isSelected = this.selectedAgentId === agent.id;
-    const statusColor = STATUS_COLORS[status] || STATUS_COLORS.VERDE;
-
-    // Halo de selección o alerta en el suelo
-    if (isSelected || status === 'ROJO' || activity === 'working') {
-      const pulse = 0.55 + Math.sin(this.t * 4) * 0.25;
-      const ringColor = isSelected ? theme.deskAccent : statusColor;
-      const r0 = this.iso(gx - 0.8, gy - 0.7, 1);
-      const r1 = this.iso(gx + 1.2, gy - 0.7, 1);
-      const r2 = this.iso(gx + 1.2, gy + 1.1, 1);
-      const r3 = this.iso(gx - 0.8, gy + 1.1, 1);
-      ctx.save();
-      ctx.globalAlpha = isSelected ? 0.9 : pulse * 0.65;
-      this.drawPoly(ctx, [r0, r1, r2, r3], 'transparent', ringColor, isSelected ? 2.6 : 1.8);
-      ctx.restore();
-    }
-
-    // Mobiliario temático según tipo de avatar
-    if (agent.avatar === 'mecanico') {
-      // Sedán MG 6 simplificado + terminal OBD-II
-      this.drawBox(ctx, gx - 0.45, gy - 0.25, 1.35, 0.72, 13, theme.carColor, '#9f1239', '#881337');
-      this.drawBox(ctx, gx - 0.15, gy - 0.18, 0.75, 0.58, 22, '#93c5fd', '#475569', '#334155');
-      // Escáner OBD-II lateral
-      this.drawBox(ctx, gx - 0.55, gy + 0.58, 0.45, 0.35, 20, theme.deskTop, theme.deskSide, '#0f172a');
-    } else if (agent.avatar === 'combustible') {
-      // Surtidor COPEC + escritorio
-      this.drawBox(ctx, gx - 0.45, gy - 0.3, 1.2, 0.65, 16, theme.deskTop, theme.deskSide, '#0f172a');
-      this.drawBox(ctx, gx + 0.55, gy - 0.42, 0.38, 0.34, 34, '#ef4444', '#b91c1c', '#1d4ed8');
-    } else if (agent.avatar === 'profesor') {
-      // Mesa de laboratorio + tubo brillante
-      this.drawBox(ctx, gx - 0.45, gy - 0.3, 1.3, 0.7, 17, theme.deskTop, theme.deskSide, '#0f172a');
-      this.drawBox(ctx, gx + 0.5, gy - 0.25, 0.26, 0.26, 36, '#5eead4', '#14b8a6', '#0f766e');
-    } else {
-      // Escritorio tech estándar con monitor
-      this.drawBox(ctx, gx - 0.45, gy - 0.3, 1.25, 0.68, 16, theme.deskTop, theme.deskSide, '#0f172a');
-    }
-
-    // Monitor con brillo dinámico
-    const screenColor = activity === 'working' ? '#38bdf8' : status === 'ROJO' ? '#f87171' : '#34d399';
-    this.drawBox(ctx, gx - 0.22, gy - 0.2, 0.52, 0.14, 30, '#0f172a', screenColor, '#1e293b');
-
-    // Personaje animado frente al escritorio
-    const bob = activity === 'working' ? Math.abs(Math.sin(this.t * 6)) * 4 : Math.sin(this.t * 2 + gx) * 1.5;
-    const charPt = this.iso(gx + 0.15, gy + 0.62, 16 + bob);
-
-    // Cuerpo del personaje
-    const bodyColors = {
-      contador: '#3b82f6',
-      combustible: '#ef4444',
-      mecanico: '#f59e0b',
-      perro: '#b45309',
-      profesor: '#e2e8f0',
-      bateria: '#10b981',
-      robot: '#8b5cf6',
-      servidor: '#06b6d4',
-      camara: '#64748b'
-    };
-    const bodyCol = bodyColors[agent.avatar] || '#38bdf8';
-
-    // Sombra en el piso
-    const shPt = this.iso(gx + 0.15, gy + 0.62, 1);
-    ctx.fillStyle = 'rgba(0,0,0,0.28)';
-    ctx.beginPath();
-    ctx.ellipse(shPt.x, shPt.y, 11, 5.5, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Torso
-    ctx.fillStyle = bodyCol;
-    ctx.beginPath();
-    ctx.roundRect(charPt.x - 8, charPt.y - 12, 16, 17, 6);
-    ctx.fill();
-
-    // Cabeza
-    ctx.fillStyle = agent.avatar === 'perro' ? '#92400e' : agent.avatar === 'robot' ? '#cbd5e1' : '#fde68a';
-    ctx.beginPath();
-    ctx.arc(charPt.x, charPt.y - 19, 8.5, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Detalle simpático (lentes profesor / orejas perro / antena robot)
-    if (agent.avatar === 'profesor') {
-      ctx.strokeStyle = '#0f172a';
-      ctx.lineWidth = 1.6;
-      ctx.strokeRect(charPt.x - 6, charPt.y - 21, 5, 4);
-      ctx.strokeRect(charPt.x + 1, charPt.y - 21, 5, 4);
-    } else if (agent.avatar === 'perro') {
-      ctx.fillStyle = '#78350f';
-      ctx.fillRect(charPt.x - 10, charPt.y - 22, 3.5, 8);
-      ctx.fillRect(charPt.x + 6.5, charPt.y - 22, 3.5, 8);
-    } else if (agent.avatar === 'robot') {
-      ctx.strokeStyle = '#38bdf8';
-      ctx.beginPath();
-      ctx.moveTo(charPt.x, charPt.y - 27);
-      ctx.lineTo(charPt.x, charPt.y - 33);
-      ctx.stroke();
-    }
-
-    // Semáforo flotante sobre el puesto
-    const badgePt = this.iso(gx + 0.15, gy + 0.25, 58 + bob * 0.5);
-    ctx.fillStyle = statusColor;
-    ctx.beginPath();
-    ctx.arc(badgePt.x, badgePt.y, status === 'ROJO' ? 7 + Math.sin(this.t * 6) * 1.4 : 6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 1.6;
-    ctx.stroke();
-
-    // Etiqueta con nombre del agente
-    const labelPt = this.iso(gx + 0.15, gy + 0.85, -8);
-    ctx.font = '700 11px -apple-system, BlinkMacSystemFont, sans-serif';
-    const textW = ctx.measureText(agent.name).width;
-    const padX = 8;
-    ctx.fillStyle = theme.labelBg;
-    ctx.beginPath();
-    ctx.roundRect(labelPt.x - textW / 2 - padX, labelPt.y - 10, textW + padX * 2, 20, 7);
-    ctx.fill();
-    ctx.strokeStyle = isSelected ? theme.deskAccent : 'rgba(255,255,255,0.14)';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    ctx.fillStyle = theme.labelText;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(agent.name, labelPt.x, labelPt.y);
-
-    // Burbuja de diálogo temporal (acciones o alertas)
-    const bubble = this.bubbles.get(agent.id);
-    if (bubble && bubble.until > performance.now()) {
-      const bPt = this.iso(gx + 0.15, gy + 0.25, 76);
-      ctx.font = '600 10.5px -apple-system, sans-serif';
-      const bw = Math.min(200, ctx.measureText(bubble.text).width + 18);
-      ctx.fillStyle = '#ffffff';
-      ctx.beginPath();
-      ctx.roundRect(bPt.x - bw / 2, bPt.y - 22, bw, 22, 8);
-      ctx.fill();
-      ctx.fillStyle = '#0f172a';
-      ctx.fillText(bubble.text.slice(0, 32), bPt.x, bPt.y - 11);
-    }
   }
 }
