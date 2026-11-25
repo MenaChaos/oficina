@@ -3,14 +3,14 @@
  * Conecta OfficeStore, RoomAssetManager, OfficeRenderer y BridgeAPI.
  */
 
-import { OfficeStore } from '../core/store.js?v=3.7';
-import { OfficeRenderer } from '../core/renderer.js?v=3.7';
-import { RoomAssetManager, compressImageFileToDataUrl } from '../core/assets.js?v=3.7';
+import { OfficeStore } from '../core/store.js?v=3.8';
+import { OfficeRenderer } from '../core/renderer.js?v=3.8';
+import { RoomAssetManager, compressImageFileToDataUrl } from '../core/assets.js?v=3.8';
 import { THEMES } from '../themes/themes.js';
-import { ROOM_TEMPLATES, BUILDING_FLOORPLAN, getRoomTemplate } from '../config/rooms.js?v=3.7';
-import { AVATAR_TEMPLATES } from '../config/avatars.js?v=3.7';
-import { parseSteamHistoryLines } from '../core/api.js?v=3.7';
-import { OfficeChatterEngine } from '../core/chatter.js?v=3.7';
+import { ROOM_TEMPLATES, BUILDING_FLOORPLAN, getRoomTemplate } from '../config/rooms.js?v=3.8';
+import { AVATAR_TEMPLATES } from '../config/avatars.js?v=3.8';
+import { parseSteamHistoryLines } from '../core/api.js?v=3.8';
+import { OfficeChatterEngine } from '../core/chatter.js?v=3.8';
 
 const store = new OfficeStore();
 let assetManager = null;
@@ -131,6 +131,9 @@ function init() {
 
   store.subscribe((state, event) => {
     renderAll(event === 'theme_changed' || event === 'agent_changed');
+    if (event === 'synced' && chatter) {
+      chatter.onLiveDataUpdated(false);
+    }
   });
 
   renderAll();
@@ -204,7 +207,8 @@ function bindGlobalEvents() {
   $('#btn-sync').addEventListener('click', async () => {
     try {
       await store.syncData(true);
-      toast('Datos actualizados');
+      if (chatter) chatter.onLiveDataUpdated(true);
+      toast('Datos y diálogos actualizados');
     } catch (err) {
       toast('Error al sincronizar: ' + err.message, true);
     }
@@ -640,8 +644,9 @@ function bindAgentDetailActions(container, agent) {
       try {
         if (store.state.mode === 'online') {
           await store.api.markBillStatus(tabName, nextStatus, agent.config?.sheetId);
-          renderer.say(agent.id, `${tabName}: ${nextStatus} ✓`);
+          renderer.say(agent.id, `${tabName}: ${nextStatus} ✓`, 5200, 'highlight');
           await store.syncData(true);
+          if (chatter) chatter.onLiveDataUpdated(true);
         } else {
           const item = (store.state.data[agent.id]?.items || []).find((x) => x.tabName === tabName);
           if (item) { item.status = nextStatus; item.isPaid = nextStatus === 'Pagado'; item.isOverdue = false; }
@@ -664,8 +669,9 @@ function bindAgentDetailActions(container, agent) {
       try {
         if (store.state.mode === 'online') {
           await store.api.markFuelReimbursed(rowNum, true, agent.config?.sheetId);
-          renderer.say(agent.id, `Fila #${rowNum} reembolsada ✓`);
+          renderer.say(agent.id, `Fila #${rowNum} reembolsada ✓`, 5200, 'highlight');
           await store.syncData(true);
+          if (chatter) chatter.onLiveDataUpdated(true);
         } else {
           toast(`Demo: fila #${rowNum} marcada como reembolsada`);
         }
@@ -1184,7 +1190,14 @@ function updateChatterStatusUI(info) {
     el.textContent = '✨ Consultando a OpenAI para generar diálogos frescos...';
   } else if (info.status === 'openai') {
     el.className = 'feedback-msg ok';
-    el.textContent = '✓ Diálogos dinámicos con OpenAI (gpt-4o-mini) activos';
+    let timeSuffix = '';
+    if (info.generatedAt) {
+      const d = new Date(info.generatedAt);
+      if (!isNaN(d.getTime())) {
+        timeSuffix = ' · lote ' + d.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+      }
+    }
+    el.textContent = '✓ Diálogos dinámicos con OpenAI (gpt-4o-mini) activos' + timeSuffix;
   } else {
     el.className = 'feedback-msg';
     el.textContent = info.error

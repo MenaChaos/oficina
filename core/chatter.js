@@ -1,9 +1,9 @@
 /**
- * CAPA DE VIDA Y DIÁLOGOS DE OFICINA (core/chatter.js)
- * Genera:
- * 1. Globos destacados inmediatos al hacer clic en cualquier avatar (con datos reales).
- * 2. Comentarios espontáneos de trabajo y conversaciones de 2 turnos entre personajes.
- * 3. Integración opcional con OpenAI (vía Code.gs ?action=chatter, cacheado 30 min para gastar casi $0).
+ * CAPA DE VIDA Y DIÁLOGOS DE OFICINA v3.8 (core/chatter.js)
+ * - Sincronizado en tiempo real con los datos vivos de cada agente mediante huella de estado (fingerprint).
+ * - Si pagas una cuenta, reembolsas COPEC, llega un nuevo viaje del MG 6 o cambia cualquier estado,
+ *   descarta al instante los diálogos antiguos y regenera un lote fresco con OpenAI automáticamente.
+ * - Renueva los diálogos cada 30 min aunque el iPad quede abierto todo el día en Modo Kiosco.
  */
 
 export class OfficeChatterEngine {
@@ -14,22 +14,104 @@ export class OfficeChatterEngine {
 
     this.timer = null;
     this.replyTimer = null;
-    this.aiPack = null; // { highlights: {}, solo: [], conversations: [], generatedAt }
+    this.aiPack = null; // { highlights: {}, solo: [], conversations: [], generatedAt, stateHash }
+    this.aiPackFingerprint = '';
+    this.lastKnownFingerprint = '';
     this.aiStatus = 'local'; // 'local' | 'loading' | 'openai' | 'error'
     this.aiLastError = '';
     this.soloCursor = 0;
     this.convCursor = 0;
     this.turnCounter = 0;
     this.lastAiFetchTs = 0;
+    this.inFlight = false;
   }
 
   getPrefs() {
     const p = this.store.state.prefs || {};
     return {
       chatterMode: p.chatterMode || 'normal', // 'off' | 'calm' | 'normal' | 'lively'
-      useOpenAI: p.useOpenAI !== false,       // true por defecto (si Code.gs tiene OPENAI_API_KEY, lo usa; si no, fallback local)
+      useOpenAI: p.useOpenAI !== false,       // true por defecto
       avatarMotion: p.avatarMotion !== false  // true por defecto
     };
+  }
+
+  /**
+   * Genera una huella compacta del estado real actual de los agentes activos.
+   * Si cambia un pago, un reembolso, un viaje del MG 6 o una corrida de bot, esta huella cambia.
+   */
+  computeDataFingerprint() {
+    const office = this.store.getActiveOffice();
+    const agents = (office?.agents || []).filter((a) => a.enabled !== false);
+    const data = this.store.state.data || {};
+    const parts = agents.map((a) => {
+      const live = data[a.id] || {};
+      const m = live.metrics || {};
+      const t = live.telemetry || {};
+      const gh = live.github || {};
+      const fp = live.filePreview || {};
+      return [
+        a.id,
+        live.status || '',
+        live.headline || '',
+        m.pendingCount ?? '',
+        m.overdueCount ?? '',
+        m.totalPendingCLP ?? '',
+        m.pendingReimbursementsCount ?? '',
+        m.monthBencinaCLP ?? '',
+        m.monthDieselCLP ?? '',
+        t.ultimaActualizacion || '',
+        gh.runNumber ?? '',
+        fp.totalLines ?? ''
+      ].join('|');
+    });
+    return parts.join('||');
+  }
+
+  /**
+   * Verifica si el lote actual de OpenAI sigue correspondiendo a los datos reales de hoy.
+   */
+  isAiPackFresh() {
+    if (!this.aiPack) return false;
+    const currentFp = this.computeDataFingerprint();
+    if (this.aiPackFingerprint && currentFp && this.aiPackFingerprint !== currentFp) {
+      return false;
+    }
+    // Expirar en cliente a los 35 min para renovar contexto horario/diario
+    if (this.lastAiFetchTs && Date.now() - this.lastAiFetchTs > 35 * 60 * 1000) {
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Llamar cada vez que los datos se sincronizan o se ejecuta una acción (pagar cuenta, reembolsar, etc.).
+   */
+  onLiveDataUpdated(forceAction = false) {
+    const currentFp = this.computeDataFingerprint();
+    const dataChanged = Boolean(
+      currentFp && this.lastKnownFingerprint && currentFp !== this.lastKnownFingerprint
+    );
+    this.lastKnownFingerprint = currentFp;
+
+    if (forceAction || dataChanged) {
+      // Descartar inmediatamente diálogos viejos para jamás mostrar deudas ya pagadas
+      this.aiPack = null;
+      this.aiPackFingerprint = '';
+      if (this.store.state.mode === 'online' && this.getPrefs().useOpenAI) {
+        this.refreshFromOpenAI(true);
+      }
+      return;
+    }
+
+    // Si el iPad lleva >30 min abierto sin recargar, renovar lote automáticamente en segundo plano
+    const ageMs = Date.now() - this.lastAiFetchTs;
+    if (
+      this.store.state.mode === 'online' &&
+      this.getPrefs().useOpenAI &&
+      (!this.aiPack || ageMs >= 30 * 60 * 1000)
+    ) {
+      this.refreshFromOpenAI(false);
+    }
   }
 
   start() {
@@ -37,7 +119,6 @@ export class OfficeChatterEngine {
     const { chatterMode } = this.getPrefs();
     if (chatterMode === 'off') return;
 
-    // Primer globo ambiente rápido para que la oficina se sienta viva al abrirla
     this.timer = setTimeout(() => {
       this.tick();
     }, 3500);
@@ -73,12 +154,16 @@ export class OfficeChatterEngine {
       return null;
     }
 
-    // Evitar pedir más de una vez cada 20 min salvo que sea forzado
+    if (this.inFlight) return this.aiPack;
+
+    const currentFp = this.computeDataFingerprint();
     const now = Date.now();
-    if (!force && this.aiPack && now - this.lastAiFetchTs < 20 * 60 * 1000) {
+    const sameState = this.aiPackFingerprint && this.aiPackFingerprint === currentFp;
+    if (!force && this.aiPack && sameState && now - this.lastAiFetchTs < 25 * 60 * 1000) {
       return this.aiPack;
     }
 
+    this.inFlight = true;
     this.aiStatus = 'loading';
     this.aiLastError = '';
     this.emitStatus();
@@ -87,7 +172,9 @@ export class OfficeChatterEngine {
       const res = await this.store.api.getChatter(force);
       if (res && res.chatter && res.source === 'openai') {
         this.aiPack = res.chatter;
-        this.lastAiFetchTs = now;
+        this.aiPackFingerprint = this.computeDataFingerprint();
+        this.lastKnownFingerprint = this.aiPackFingerprint;
+        this.lastAiFetchTs = Date.now();
         this.soloCursor = 0;
         this.convCursor = 0;
         this.aiStatus = 'openai';
@@ -96,9 +183,10 @@ export class OfficeChatterEngine {
         if (res && res.note) this.aiLastError = res.note;
       }
     } catch (err) {
-      // Si el backend aún no tiene la acción chatter, caemos silenciosamente al motor local
       this.aiStatus = 'local';
       this.aiLastError = err.message || '';
+    } finally {
+      this.inFlight = false;
     }
 
     this.emitStatus();
@@ -110,7 +198,8 @@ export class OfficeChatterEngine {
       this.onStatusChange({
         status: this.aiStatus,
         error: this.aiLastError,
-        hasPack: Boolean(this.aiPack)
+        hasPack: Boolean(this.aiPack),
+        generatedAt: this.aiPack?.generatedAt || ''
       });
     }
   }
@@ -121,8 +210,18 @@ export class OfficeChatterEngine {
   }
 
   tick() {
-    const { chatterMode } = this.getPrefs();
+    const { chatterMode, useOpenAI } = this.getPrefs();
     if (chatterMode === 'off') return;
+
+    // Auto-renovación cada 30 min aunque el usuario no toque nada en el iPad
+    if (
+      useOpenAI &&
+      this.store.state.mode === 'online' &&
+      !this.inFlight &&
+      (!this.isAiPackFresh() || Date.now() - this.lastAiFetchTs >= 30 * 60 * 1000)
+    ) {
+      this.refreshFromOpenAI(false);
+    }
 
     if (!this.isOfficeViewActive()) {
       this.scheduleNext();
@@ -137,7 +236,6 @@ export class OfficeChatterEngine {
     }
 
     this.turnCounter++;
-    // Alternar: ~45% conversaciones de 2 turnos entre colegas, ~55% comentarios individuales de trabajo
     const doConversation = activeAgents.length >= 2 && (this.turnCounter % 2 === 0);
 
     if (doConversation) {
@@ -160,8 +258,8 @@ export class OfficeChatterEngine {
     const live = this.store.state.data[agent.id] || {};
     const status = agent.enabled === false ? 'PAUSADO' : live.status || 'VERDE';
 
-    // Priorizar highlight generado por OpenAI si existe y no hay error crítico nuevo
-    const aiLine = this.aiPack && this.aiPack.highlights && this.aiPack.highlights[agent.id];
+    // Usar highlight de OpenAI SOLO si el lote corresponde al estado real actual
+    const aiLine = this.isAiPackFresh() && this.aiPack.highlights && this.aiPack.highlights[agent.id];
     const text = aiLine || this.buildLocalHighlight(agent, live);
     const tone = status === 'ROJO' ? 'alert' : 'highlight';
 
@@ -169,20 +267,19 @@ export class OfficeChatterEngine {
   }
 
   playSoloRemark(activeAgents) {
-    // 1. Si hay guion de OpenAI, alternar sus líneas frescas
-    if (this.aiPack && Array.isArray(this.aiPack.solo) && this.aiPack.solo.length > 0) {
+    if (this.isAiPackFresh() && Array.isArray(this.aiPack.solo) && this.aiPack.solo.length > 0) {
       const validIds = new Set(activeAgents.map((a) => a.id));
       for (let tries = 0; tries < this.aiPack.solo.length; tries++) {
         const entry = this.aiPack.solo[this.soloCursor % this.aiPack.solo.length];
         this.soloCursor++;
         if (entry && validIds.has(entry.agentId) && entry.text) {
-          this.renderer.say(entry.agentId, entry.text, 5600, 'chat');
+          const live = this.store.state.data[entry.agentId] || {};
+          this.renderer.say(entry.agentId, entry.text, 5800, live.status === 'ROJO' ? 'alert' : 'chat');
           return;
         }
       }
     }
 
-    // 2. Motor local dinámico basado en los datos reales del agente
     const agent = activeAgents[Math.floor(Math.random() * activeAgents.length)];
     const live = this.store.state.data[agent.id] || {};
     const lines = this.buildLocalSoloLines(agent, live);
@@ -195,8 +292,7 @@ export class OfficeChatterEngine {
 
     const validIds = new Set(activeAgents.map((a) => a.id));
 
-    // 1. Si hay conversaciones generadas por OpenAI, usarlas
-    if (this.aiPack && Array.isArray(this.aiPack.conversations) && this.aiPack.conversations.length > 0) {
+    if (this.isAiPackFresh() && Array.isArray(this.aiPack.conversations) && this.aiPack.conversations.length > 0) {
       for (let tries = 0; tries < this.aiPack.conversations.length; tries++) {
         const c = this.aiPack.conversations[this.convCursor % this.aiPack.conversations.length];
         this.convCursor++;
@@ -207,7 +303,6 @@ export class OfficeChatterEngine {
       }
     }
 
-    // 2. Motor local de conversaciones dinámicas cruzando datos reales
     const convs = this.buildLocalConversations(activeAgents);
     if (convs.length === 0) {
       this.playSoloRemark(activeAgents);
@@ -218,15 +313,15 @@ export class OfficeChatterEngine {
   }
 
   dispatchTwoTurnChat(fromId, line1, toId, line2) {
-    this.renderer.say(fromId, line1, 5600, 'chat', toId);
+    this.renderer.say(fromId, line1, 5800, 'chat', toId);
     this.replyTimer = setTimeout(() => {
       if (!this.isOfficeViewActive()) return;
-      this.renderer.say(toId, line2, 5800, 'chat', fromId);
+      this.renderer.say(toId, line2, 6000, 'chat', fromId);
     }, 3400);
   }
 
   // ==========================================================================
-  // GENERADOR LOCAL INTELIGENTE (USA LOS DATOS EN VIVO SIN COSTAR TOKENS)
+  // GENERADOR LOCAL DE RESPALDO (100% FIEL A LOS DATOS EN VIVO MIENTRAS CARGA IA)
   // ==========================================================================
   buildLocalHighlight(agent, live) {
     if (agent.enabled === false) return 'Estoy en pausa descansando 💤';
@@ -296,10 +391,10 @@ export class OfficeChatterEngine {
       } else if (m.pendingCount > 0) {
         lines.push(`Anotando ${m.pendingCount} boletas pendientes (${m.totalPendingDisplay}) ✍️`);
       } else {
-        lines.push('¡Libros cuadrados y cero deudas este mes! 🧝✨');
+        lines.push('¡Libros cuadrados y cero cuentas pendientes este mes! 🧝✨');
+        lines.push('Luz, agua, internet y teléfono 100% pagados 📊');
       }
-      lines.push('Revisando vencimientos de Luz, Agua e Internet...');
-      lines.push('Manteniendo los pergaminos financieros en orden 📊');
+      lines.push('Manteniendo los pergaminos financieros en orden 📒');
       return lines;
     }
 
@@ -307,10 +402,11 @@ export class OfficeChatterEngine {
       const m = live.metrics || {};
       if ((m.pendingReimbursementsCount || 0) > 0) {
         lines.push(`Tengo ${m.pendingReimbursementsCount} boletas COPEC esperando reembolso 🦊`);
+      } else {
+        lines.push('¡Todas las boletas COPEC están reembolsadas! 🦊✨');
       }
       lines.push(`Este mes van ${m.monthBencinaDisplay || '$0'} en bencina y ${m.monthDieselDisplay || '$0'} en diésel.`);
       lines.push('Preparando un espresso mientras archivo las boletas ☕');
-      lines.push('Trazando la próxima ruta hacia La Serena 🗺️');
       return lines;
     }
 
@@ -320,9 +416,6 @@ export class OfficeChatterEngine {
       lines.push(`Motor del MG 6 en ${t.estadoGeneral || 'VERDE'}: ${uv.tempMaxC || '-'}°C y ${uv.voltajeMinV || '-'}V 🔧`);
       lines.push('Revisando presión del riel GDI y trim de mezcla 🛠️');
       lines.push('Chequeando el último log OBD-II en el escáner 💻');
-      if (t.dia?.distanciaKm === '0' || t.dia?.distanciaKm === '0.03') {
-        lines.push('Hoy el MG 6 descansó bajo techo, pura prueba corta 🚗');
-      }
       return lines;
     }
 
@@ -330,7 +423,6 @@ export class OfficeChatterEngine {
       lines.push('Escuchando música lo-fi mientras vigilo el clima 🎧');
       lines.push('¡Todo tranquilo en el servidor de Discord! 🐶');
       lines.push('Listo para avisar si se arma partida nocturna 🎮');
-      lines.push('Chequeando nubes y camanchaca en Andacollo ☁️');
       return lines;
     }
 
@@ -339,15 +431,10 @@ export class OfficeChatterEngine {
       lines.push('¡Buenas noticias a todos! Escaneando rebajas en Steam 🧙');
       if (total > 0) lines.push(`Ya van ${total} juegos históricos cazados en mi bitácora 📜`);
       lines.push('Destilando pociones de descuento al 75%... 🧪');
-      lines.push('El terminal CRT acaba de detectar movimiento en Steam 🖥️');
       return lines;
     }
 
-    return [
-      live.headline || 'Monitoreando mi estación...',
-      'Todo operando con normalidad por aquí ✨',
-      'Revisando los últimos registros...'
-    ];
+    return [live.headline || 'Monitoreando mi estación...', 'Todo operando con normalidad ✨'];
   }
 
   buildLocalConversations(activeAgents) {
@@ -355,7 +442,6 @@ export class OfficeChatterEngine {
     const data = this.store.state.data || {};
     const convs = [];
 
-    // 1. Elfo Contador <-> Zorrito COPEC
     if (byId['cuentas-hogar'] && byId['control-copec']) {
       const pendFuel = data['control-copec']?.metrics?.pendingReimbursementsCount ?? 0;
       const pendBills = data['cuentas-hogar']?.metrics?.pendingCount ?? 0;
@@ -363,74 +449,42 @@ export class OfficeChatterEngine {
         from: 'cuentas-hogar',
         line1: pendFuel > 0
           ? `Zorrito, ¿ya rendiste esas ${pendFuel} boletas de COPEC?`
-          : 'Zorrito, ¿cómo cerramos las boletas de combustible?',
+          : 'Zorrito, ¿cómo vamos con las boletas de combustible?',
         to: 'control-copec',
         line2: pendFuel > 0
           ? `¡En eso estoy! Llevo ${data['control-copec']?.metrics?.monthDieselDisplay || '$0'} en diésel este mes 🦊`
           : '¡Todo rendido y ordenadito con café en mano! ☕'
       });
-      if (pendBills > 0) {
-        convs.push({
-          from: 'control-copec',
-          line1: '¿Te paso un café, Elfo? Te veo rodeado de cuentas ☕',
-          to: 'cuentas-hogar',
-          line2: `¡Sí por favor! Quedan ${pendBills} cuentas por ${data['cuentas-hogar']?.metrics?.totalPendingDisplay || '$0'} 🧝`
-        });
-      }
+      convs.push({
+        from: 'control-copec',
+        line1: pendBills > 0
+          ? '¿Te paso un café, Elfo? Te veo rodeado de cuentas ☕'
+          : 'Te veo súper relajado hoy, Elfo. ¿Todo pagado ya? ☕',
+        to: 'cuentas-hogar',
+        line2: pendBills > 0
+          ? `¡Sí por favor! Quedan ${pendBills} cuentas por ${data['cuentas-hogar']?.metrics?.totalPendingDisplay || '$0'} 🧝`
+          : '¡Así es! Todas las cuentas del hogar quedaron al día ✨'
+      });
     }
 
-    // 2. Zorrito COPEC <-> Gnomo Mecánico MG 6
     if (byId['control-copec'] && byId['monitor-mg6']) {
       const combDia = data['monitor-mg6']?.telemetry?.dia?.combustibleL || '0';
       const volt = data['monitor-mg6']?.telemetry?.ultimoViaje?.voltajeMinV || '14.5';
       convs.push({
         from: 'control-copec',
-        line1: '¿Cómo se portó el MG 6 con la 95 octanos hoy? ⛽',
+        line1: '¿Cómo se portó el MG 6 con la bencina hoy? ⛽',
         to: 'monitor-mg6',
-        line2: `¡Súper bien! Solo ${combDia} L hoy y batería firme en ${volt}V 🔧`
-      });
-      convs.push({
-        from: 'monitor-mg6',
-        line1: 'Oye Zorrito, la mezcla del turbo está impecable hoy 🛠️',
-        to: 'control-copec',
-        line2: '¡Excelente! Así rinde más la bencina en la bajada a La Serena 🗺️'
+        line2: `¡Súper bien! ${combDia} L hoy y batería firme en ${volt}V 🔧`
       });
     }
 
-    // 3. Simurdiera <-> Prof. Farnsworth
     if (byId['simurdiera'] && byId['prof-farnsworth']) {
       const total = data['prof-farnsworth']?.filePreview?.totalLines || 100;
       convs.push({
         from: 'simurdiera',
         line1: 'Profe, ¿cayó alguna joya en oferta en Steam hoy? 🎧',
         to: 'prof-farnsworth',
-        line2: `¡Buenas noticias! Ya llevo ${total} títulos en la bitácora arcana 🧙`
-      });
-      convs.push({
-        from: 'prof-farnsworth',
-        line1: 'Simurdiera, ¿cómo está el ánimo en Discord esta tarde? 🧪',
-        to: 'simurdiera',
-        line2: '¡Todo en VERDE! Listo para convocar apenas se conecten 🐶'
-      });
-    }
-
-    // 4. Gnomo Mecánico <-> Prof. Farnsworth
-    if (byId['monitor-mg6'] && byId['prof-farnsworth']) {
-      convs.push({
-        from: 'prof-farnsworth',
-        line1: '¿Y ese escáner OBD-II encontró algún gremlin en el garage? 🧙',
-        to: 'monitor-mg6',
-        line2: `Ninguno, Profe: semáforo en ${data['monitor-mg6']?.telemetry?.estadoGeneral || 'VERDE'} y caja 7DCT sana 🔧`
-      });
-    }
-
-    // 5. Elfo Contador <-> Prof. Farnsworth
-    if (byId['cuentas-hogar'] && byId['prof-farnsworth']) {
-      convs.push({
-        from: 'cuentas-hogar',
-        line1: 'Profe, ¡cuidado con tentar con ofertas de Steam antes de pagar la luz! 🧝',
-        to: 'prof-farnsworth',
-        line2: '¡Ciencia es ciencia, Elfo! Un 80% de descuento es inversión 🧪'
+        line2: `¡Buenas noticias! Ya llevo ${total} títulos en la bitácora 🧙`
       });
     }
 

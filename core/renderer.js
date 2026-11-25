@@ -8,8 +8,8 @@
  */
 
 import { getTheme } from '../themes/themes.js';
-import { getRoomTemplate, BUILDING_FLOORPLAN } from '../config/rooms.js?v=3.7';
-import { getAvatarTemplate } from '../config/avatars.js?v=3.7';
+import { getRoomTemplate, BUILDING_FLOORPLAN } from '../config/rooms.js?v=3.8';
+import { getAvatarTemplate } from '../config/avatars.js?v=3.8';
 
 const STATUS_COLORS = {
   VERDE: '#22c55e',
